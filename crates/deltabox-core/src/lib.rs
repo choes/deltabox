@@ -1007,7 +1007,45 @@ mod tests {
         assert!(segments[0].text.contains("dimensions: 1024x768"));
         assert!(segments[0]
             .text
+            .contains("exif_datetime_original: 2025:03:04 10:11:12"));
+        assert!(segments[0]
+            .text
             .contains("exif_datetime: 2025:03:04 10:11:12"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn jpeg_image_metadata_extracts_full_exif_and_gps() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("gps-photo.jpg");
+        fs::write(&input, minimal_jpeg_with_full_exif(2048, 1536)?)?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/photos/gps-photo.jpg".to_owned()),
+        })?;
+        assert_eq!(vault.search_files("DeltaPhone", false)?.len(), 1);
+        assert_eq!(vault.search_files("35.658333", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].source, "image_metadata");
+        assert!(segments[0].text.contains("exif_make: Delta"));
+        assert!(segments[0].text.contains("exif_model: DeltaPhone"));
+        assert!(segments[0].text.contains("exif_orientation: 6"));
+        assert!(segments[0].text.contains("exif_lens_model: Delta Lens"));
+        assert!(segments[0].text.contains("gps_latitude: 35.658333"));
+        assert!(segments[0].text.contains("gps_longitude: 139.700000"));
+        assert!(segments[0]
+            .text
+            .contains("gps_coordinates: 35.658333,139.700000"));
+        assert!(segments[0].text.contains("gps_altitude: 44.000"));
 
         fs::remove_dir_all(root)?;
         Ok(())
@@ -1379,12 +1417,98 @@ mod tests {
     }
 
     fn minimal_jpeg(width: u16, height: u16, datetime: Option<&str>) -> Vec<u8> {
+        minimal_jpeg_with_exif(width, height, |fields| {
+            if let Some(datetime) = datetime {
+                fields.push(exif::Field {
+                    tag: exif::Tag::DateTimeOriginal,
+                    ifd_num: exif::In::PRIMARY,
+                    value: exif::Value::Ascii(vec![format!("{datetime}\0").into_bytes()]),
+                });
+            }
+        })
+        .expect("minimal jpeg")
+    }
+
+    fn minimal_jpeg_with_full_exif(width: u16, height: u16) -> Result<Vec<u8>> {
+        minimal_jpeg_with_exif(width, height, |fields| {
+            fields.push(exif::Field {
+                tag: exif::Tag::Make,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Ascii(vec![b"Delta\0".to_vec()]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::Model,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Ascii(vec![b"DeltaPhone\0".to_vec()]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::Orientation,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Short(vec![6]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::LensModel,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Ascii(vec![b"Delta Lens\0".to_vec()]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::DateTimeOriginal,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Ascii(vec![b"2025:03:04 10:11:12\0".to_vec()]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::GPSLatitudeRef,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Ascii(vec![b"N\0".to_vec()]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::GPSLatitude,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Rational(vec![
+                    (35, 1).into(),
+                    (39, 1).into(),
+                    (3000, 100).into(),
+                ]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::GPSLongitudeRef,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Ascii(vec![b"E\0".to_vec()]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::GPSLongitude,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Rational(vec![(139, 1).into(), (42, 1).into(), (0, 1).into()]),
+            });
+            fields.push(exif::Field {
+                tag: exif::Tag::GPSAltitude,
+                ifd_num: exif::In::PRIMARY,
+                value: exif::Value::Rational(vec![(44, 1).into()]),
+            });
+        })
+    }
+
+    fn minimal_jpeg_with_exif(
+        width: u16,
+        height: u16,
+        build_fields: impl FnOnce(&mut Vec<exif::Field>),
+    ) -> Result<Vec<u8>> {
         let mut jpeg = vec![0xff, 0xd8];
-        if let Some(datetime) = datetime {
-            let payload = format!("Exif\0\0DateTimeOriginal\0{datetime}\0");
+        let mut fields = Vec::new();
+        build_fields(&mut fields);
+        if !fields.is_empty() {
+            let mut writer = exif::experimental::Writer::new();
+            for field in &fields {
+                writer.push_field(field);
+            }
+            let mut tiff = Cursor::new(Vec::new());
+            writer.write(&mut tiff, false)?;
+            let tiff = tiff.into_inner();
+            let mut payload = b"Exif\0\0".to_vec();
+            payload.extend_from_slice(&tiff);
             jpeg.extend_from_slice(&[0xff, 0xe1]);
             jpeg.extend_from_slice(&((payload.len() + 2) as u16).to_be_bytes());
-            jpeg.extend_from_slice(payload.as_bytes());
+            jpeg.extend_from_slice(&payload);
         }
         jpeg.extend_from_slice(&[0xff, 0xc0]);
         jpeg.extend_from_slice(&17_u16.to_be_bytes());
@@ -1393,7 +1517,7 @@ mod tests {
         jpeg.extend_from_slice(&width.to_be_bytes());
         jpeg.extend_from_slice(&[3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0]);
         jpeg.extend_from_slice(&[0xff, 0xd9]);
-        jpeg
+        Ok(jpeg)
     }
 
     fn minimal_zip_file(name: &str, content: &str) -> Result<Vec<u8>> {

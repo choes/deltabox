@@ -1,6 +1,7 @@
 use std::io::{Cursor, Read, Seek};
 
 use anyhow::Result;
+use exif::{In, Tag, Value};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use zip::result::ZipError;
@@ -694,9 +695,7 @@ fn extract_image_metadata(bytes: &[u8]) -> Result<Vec<(String, String)>> {
         ("height".to_owned(), height.to_string()),
         ("dimensions".to_owned(), format!("{width}x{height}")),
     ];
-    if let Some(datetime) = scan_exif_datetime(bytes) {
-        metadata.push(("exif_datetime".to_owned(), datetime));
-    }
+    append_exif_metadata(bytes, &mut metadata);
     Ok(metadata)
 }
 
@@ -781,24 +780,115 @@ fn is_jpeg_sof_marker(marker: u8) -> bool {
     )
 }
 
-fn scan_exif_datetime(bytes: &[u8]) -> Option<String> {
-    bytes.windows(19).find_map(|window| {
-        let value = std::str::from_utf8(window).ok()?;
-        if value.as_bytes()[4] == b':'
-            && value.as_bytes()[7] == b':'
-            && value.as_bytes()[10] == b' '
-            && value.as_bytes()[13] == b':'
-            && value.as_bytes()[16] == b':'
-            && value
-                .bytes()
-                .enumerate()
-                .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit())
-        {
-            Some(value.to_owned())
-        } else {
-            None
+fn append_exif_metadata(bytes: &[u8], metadata: &mut Vec<(String, String)>) {
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut Cursor::new(bytes)) else {
+        return;
+    };
+
+    push_exif_ascii(metadata, &exif, "exif_make", Tag::Make);
+    push_exif_ascii(metadata, &exif, "exif_model", Tag::Model);
+    push_exif_ascii(metadata, &exif, "exif_software", Tag::Software);
+    push_exif_ascii(metadata, &exif, "exif_lens_model", Tag::LensModel);
+    push_exif_uint(metadata, &exif, "exif_orientation", Tag::Orientation);
+
+    if let Some(datetime_original) = exif_ascii(&exif, Tag::DateTimeOriginal) {
+        metadata.push((
+            "exif_datetime_original".to_owned(),
+            datetime_original.clone(),
+        ));
+        metadata.push(("exif_datetime".to_owned(), datetime_original));
+    } else if let Some(datetime) = exif_ascii(&exif, Tag::DateTime) {
+        metadata.push(("exif_datetime".to_owned(), datetime));
+    }
+    push_exif_ascii(
+        metadata,
+        &exif,
+        "exif_offset_time_original",
+        Tag::OffsetTimeOriginal,
+    );
+
+    if let Some((latitude, longitude)) = exif_gps_coordinates(&exif) {
+        metadata.push(("gps_latitude".to_owned(), format!("{latitude:.6}")));
+        metadata.push(("gps_longitude".to_owned(), format!("{longitude:.6}")));
+        metadata.push((
+            "gps_coordinates".to_owned(),
+            format!("{latitude:.6},{longitude:.6}"),
+        ));
+    }
+    push_exif_rational(metadata, &exif, "gps_altitude", Tag::GPSAltitude);
+}
+
+fn push_exif_ascii(metadata: &mut Vec<(String, String)>, exif: &exif::Exif, key: &str, tag: Tag) {
+    if let Some(value) = exif_ascii(exif, tag) {
+        metadata.push((key.to_owned(), value));
+    }
+}
+
+fn push_exif_uint(metadata: &mut Vec<(String, String)>, exif: &exif::Exif, key: &str, tag: Tag) {
+    if let Some(field) = exif.get_field(tag, In::PRIMARY) {
+        if let Some(value) = field.value.get_uint(0) {
+            metadata.push((key.to_owned(), value.to_string()));
         }
-    })
+    }
+}
+
+fn push_exif_rational(
+    metadata: &mut Vec<(String, String)>,
+    exif: &exif::Exif,
+    key: &str,
+    tag: Tag,
+) {
+    if let Some(field) = exif.get_field(tag, In::PRIMARY) {
+        if let Value::Rational(values) = &field.value {
+            if let Some(value) = values.first() {
+                metadata.push((key.to_owned(), format!("{:.3}", value.to_f64())));
+            }
+        }
+    }
+}
+
+fn exif_ascii(exif: &exif::Exif, tag: Tag) -> Option<String> {
+    let field = exif.get_field(tag, In::PRIMARY)?;
+    let Value::Ascii(values) = &field.value else {
+        return None;
+    };
+    let value = values.first()?;
+    Some(
+        String::from_utf8_lossy(value)
+            .trim_end_matches('\0')
+            .trim()
+            .to_owned(),
+    )
+    .filter(|value| !value.is_empty())
+}
+
+fn exif_gps_coordinates(exif: &exif::Exif) -> Option<(f64, f64)> {
+    let latitude = exif_gps_coordinate(exif, Tag::GPSLatitude, Tag::GPSLatitudeRef, ["S", "s"])?;
+    let longitude = exif_gps_coordinate(exif, Tag::GPSLongitude, Tag::GPSLongitudeRef, ["W", "w"])?;
+    Some((latitude, longitude))
+}
+
+fn exif_gps_coordinate(
+    exif: &exif::Exif,
+    coordinate_tag: Tag,
+    reference_tag: Tag,
+    negative_refs: [&str; 2],
+) -> Option<f64> {
+    let field = exif.get_field(coordinate_tag, In::PRIMARY)?;
+    let Value::Rational(values) = &field.value else {
+        return None;
+    };
+    if values.len() < 3 {
+        return None;
+    }
+    let mut coordinate =
+        values[0].to_f64() + values[1].to_f64() / 60.0 + values[2].to_f64() / 3600.0;
+    if let Some(reference) = exif_ascii(exif, reference_tag) {
+        if negative_refs.contains(&reference.as_str()) {
+            coordinate = -coordinate;
+        }
+    }
+    Some(coordinate)
 }
 
 fn zip_archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {

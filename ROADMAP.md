@@ -19,7 +19,7 @@
 - XLSX 单元格文本索引
 - PPTX 幻灯片文本索引
 - PPTX speaker notes 索引
-- 图片基础元数据索引
+- 图片元数据索引，支持 EXIF / GPS
 - Office 文档索引容错
 - 搜索结果片段增强
 - PDF 按页索引任务和可恢复进度
@@ -52,7 +52,6 @@
 ### 中期计划
 
 - 图片和扫描版 PDF 的 OCR
-- 完整 EXIF / GPS 元数据提取
 - Office 复杂内容索引：DOCX 批注/修订历史、XLSX 图表/公式/批注
 - 视频关键帧和语音转文字索引
 - 后台 worker 守护进程
@@ -98,7 +97,7 @@
 - XLSX cell text indexing
 - PPTX slide text indexing
 - PPTX speaker notes indexing
-- Basic image metadata indexing
+- Image metadata indexing with EXIF / GPS
 - Office indexing fault tolerance
 - Detailed search result segments
 - Page-level PDF indexing tasks and resumable progress
@@ -131,7 +130,6 @@
 ### Mid-Term Plan
 
 - OCR for images and scanned PDFs
-- Full EXIF / GPS metadata extraction
 - Complex Office content indexing: DOCX comments/revisions, XLSX charts/formulas/comments
 - Video keyframe and ASR text indexing
 - Background worker daemon

@@ -15,6 +15,7 @@ anyhow = "1.0"
 chacha20poly1305 = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
+exif = { package = "kamadak-exif", version = "0.6" }
 object_store = { version = "0.11", features = ["aws"] }
 pdf-extract = "0.12"
 quick-xml = "0.37"
