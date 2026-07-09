@@ -292,6 +292,66 @@ mod tests {
     }
 
     #[test]
+    fn utf8_text_index_tasks_resume_chunk_by_chunk() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("large.txt");
+        let mut content = String::new();
+        for line in 0..250 {
+            content.push_str(&format!("line {line} common text\n"));
+        }
+        content.push_str("tail chunk searchable marker\n");
+        fs::write(&input, content)?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/large.txt".to_owned()),
+        })?;
+
+        let job = vault.enqueue_index_file(&manifest.file_id)?;
+        assert_eq!(job.total_tasks, 3);
+        assert_eq!(job.completed_tasks, 0);
+
+        let summary = vault.run_index_worker(1)?;
+        assert_eq!(summary.completed, 1);
+        let jobs = vault.list_index_jobs()?;
+        let job = jobs
+            .iter()
+            .find(|candidate| candidate.job_id == job.job_id)
+            .expect("index job");
+        assert_eq!(job.completed_tasks, 1);
+        assert_eq!(job.status, "pending");
+        assert!(vault.search_files("tail chunk", false)?.is_empty());
+
+        let summary = vault.run_index_worker(10)?;
+        assert_eq!(summary.completed, 2);
+        let jobs = vault.list_index_jobs()?;
+        let job = jobs
+            .iter()
+            .find(|candidate| {
+                candidate.file_id == manifest.file_id && candidate.status == "completed"
+            })
+            .expect("completed index job");
+        assert_eq!(job.total_tasks, 3);
+        assert_eq!(job.completed_tasks, 3);
+        assert_eq!(vault.search_files("tail chunk", false)?.len(), 1);
+
+        let conn = vault.open_db()?;
+        let task_segments: u64 = conn.query_row(
+            "SELECT COUNT(DISTINCT task_key) FROM text_segments WHERE file_id = ?1",
+            [&manifest.file_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(task_segments, 3);
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn index_job_pause_and_resume_controls_worker() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");

@@ -57,10 +57,15 @@ impl TextExtractor for Utf8TextExtractor {
         )
     }
 
-    fn plan_tasks(&self, _manifest: &FileManifest, _bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
-        Ok(vec![ExtractionTask {
-            task_key: "text:full".to_owned(),
-        }])
+    fn plan_tasks(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
+        let text = std::str::from_utf8(bytes)?;
+        Ok(split_text_segments(text, 100)
+            .into_iter()
+            .enumerate()
+            .map(|(segment_index, _)| ExtractionTask {
+                task_key: format!("text:chunk:{segment_index}"),
+            })
+            .collect())
     }
 
     fn extract_task(
@@ -69,18 +74,25 @@ impl TextExtractor for Utf8TextExtractor {
         bytes: &[u8],
         task: &ExtractionTask,
     ) -> Result<Vec<ExtractedTextSegment>> {
-        if task.task_key != "text:full" {
-            anyhow::bail!("unsupported UTF-8 text extraction task: {}", task.task_key);
-        }
+        let task_index = task
+            .task_key
+            .strip_prefix("text:chunk:")
+            .ok_or_else(|| {
+                anyhow::anyhow!("unsupported UTF-8 text extraction task: {}", task.task_key)
+            })?
+            .parse::<usize>()?;
         let text = std::str::from_utf8(bytes)?;
         let source = text_source_for_mime(&manifest.mime).to_owned();
-        Ok(split_text_segments(text, 100)
+        let segment = split_text_segments(text, 100)
             .into_iter()
-            .enumerate()
-            .map(|(segment_index, segment)| {
-                segment_from_text(source.clone(), segment_index, segment)
-            })
-            .collect())
+            .nth(task_index)
+            .ok_or_else(|| anyhow::anyhow!("text chunk task out of range: {}", task.task_key))?;
+        Ok(vec![segment_from_text(
+            source,
+            task.task_key.clone(),
+            task_index,
+            segment,
+        )])
     }
 }
 
@@ -141,12 +153,13 @@ impl TextExtractor for PdfTextExtractor {
 
 fn segment_from_text(
     source: String,
+    task_key: String,
     segment_index: usize,
     segment: TextSegmentDraft,
 ) -> ExtractedTextSegment {
     ExtractedTextSegment {
         source,
-        task_key: format!("text_chunk:{segment_index}"),
+        task_key,
         segment_index: segment_index as u64,
         text: segment.text,
         page: None,
