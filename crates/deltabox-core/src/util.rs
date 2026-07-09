@@ -61,22 +61,6 @@ pub(crate) fn split_text_segments(text: &str, max_lines: usize) -> Vec<TextSegme
     segments
 }
 
-pub(crate) fn is_text_mime(mime: &str) -> bool {
-    matches!(
-        mime,
-        "text/plain" | "text/markdown" | "text/csv" | "application/json"
-    )
-}
-
-pub(crate) fn text_source_for_mime(mime: &str) -> &'static str {
-    match mime {
-        "text/markdown" => "markdown",
-        "text/csv" => "csv",
-        "application/json" => "json",
-        _ => "plain_text",
-    }
-}
-
 pub(crate) fn normalize_tag_name(name: &str) -> Result<String> {
     let normalized = name.trim().to_owned();
     if normalized.is_empty() {

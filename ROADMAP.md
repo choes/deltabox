@@ -12,6 +12,7 @@
 - 回收站、恢复、永久删除、chunk GC
 - 用户标签系统和标签搜索
 - UTF-8 文本文档全文索引
+- 通用文本提取器抽象
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -81,6 +82,7 @@
 - Trash, restore, purge, and chunk GC
 - User tag system and tag search
 - Full-text indexing for UTF-8 text documents
+- Generic text extractor abstraction
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations

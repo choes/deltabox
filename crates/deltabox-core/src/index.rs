@@ -4,8 +4,9 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
+use crate::extractors::{extractor_for_manifest, is_text_extractable, ExtractedTextSegment};
 use crate::manifest::FileManifest;
-use crate::util::{is_text_mime, now_rfc3339, split_text_segments, text_source_for_mime};
+use crate::util::now_rfc3339;
 use crate::{IndexJobRecord, Vault};
 
 #[derive(Debug, Clone)]
@@ -33,7 +34,7 @@ impl Vault {
     pub fn enqueue_index_file(&self, file_id: &str) -> Result<IndexJobRecord> {
         self.ensure_file_exists(file_id)?;
         let manifest = self.get_manifest(file_id)?;
-        if !is_text_mime(&manifest.mime) {
+        if !is_text_extractable(&manifest) {
             return self.create_skipped_index_job(&manifest, "unsupported_mime");
         }
 
@@ -55,7 +56,7 @@ impl Vault {
         let mut jobs = Vec::new();
         for file in files {
             let manifest = self.get_manifest(&file.file_id)?;
-            if is_text_mime(&manifest.mime) {
+            if is_text_extractable(&manifest) {
                 let job = self.enqueue_index_file(&file.file_id)?;
                 self.run_index_job(&job.job_id)?;
                 jobs.push(self.get_index_job(&job.job_id)?);
@@ -132,7 +133,7 @@ impl Vault {
         manifest: &FileManifest,
         _path: &Path,
     ) -> Result<()> {
-        if !is_text_mime(&manifest.mime) {
+        if !is_text_extractable(manifest) {
             return Ok(());
         }
         let job = self.enqueue_index_file(&manifest.file_id)?;
@@ -172,12 +173,11 @@ impl Vault {
             return Err(anyhow!("unsupported index task type: {}", task.task_type));
         }
         let manifest = self.get_manifest(&task.file_id)?;
-        if !is_text_mime(&manifest.mime) {
-            return Err(anyhow!("unsupported mime type: {}", manifest.mime));
-        }
+        let extractor = extractor_for_manifest(&manifest)
+            .ok_or_else(|| anyhow!("unsupported mime type: {}", manifest.mime))?;
         let bytes = self.read_file_bytes(&manifest)?;
-        let text = std::str::from_utf8(&bytes)?;
-        self.replace_text_segments(&manifest, text)?;
+        let segments = extractor.extract(&manifest, &bytes)?;
+        self.replace_text_segments(&manifest, segments)?;
         self.record_event(
             "index.updated",
             Some(&manifest.file_id),
@@ -186,41 +186,46 @@ impl Vault {
         Ok(())
     }
 
-    fn replace_text_segments(&self, manifest: &FileManifest, text: &str) -> Result<()> {
+    fn replace_text_segments(
+        &self,
+        manifest: &FileManifest,
+        segments: Vec<ExtractedTextSegment>,
+    ) -> Result<()> {
         let conn = self.open_db()?;
         self.delete_text_segments_for_file(&conn, &manifest.file_id)?;
 
-        let source = text_source_for_mime(&manifest.mime);
-        let chunks = split_text_segments(text, 100);
-        for (segment_index, segment) in chunks.into_iter().enumerate() {
+        for segment in segments {
             let segment_id = Uuid::new_v4().to_string();
             let now = now_rfc3339();
-            let task_key = format!("text_chunk:{segment_index}");
             conn.execute(
                 "INSERT INTO text_segments (
                     segment_id, file_id, source, task_key, segment_index, text,
                     page, line_start, line_end, char_start, char_end, start_ms, end_ms,
                     confidence, created_at, updated_at
                  )
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, NULL, NULL, 1.0, ?11, ?12)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
-                    segment_id,
-                    manifest.file_id,
-                    source,
-                    task_key,
-                    segment_index as u64,
-                    segment.text,
+                    &segment_id,
+                    &manifest.file_id,
+                    &segment.source,
+                    &segment.task_key,
+                    segment.segment_index,
+                    &segment.text,
+                    segment.page,
                     segment.line_start,
                     segment.line_end,
                     segment.char_start,
                     segment.char_end,
+                    segment.start_ms,
+                    segment.end_ms,
+                    segment.confidence,
                     now,
                     now,
                 ],
             )?;
             conn.execute(
                 "INSERT INTO text_segments_fts (segment_id, file_id, text) VALUES (?1, ?2, ?3)",
-                params![segment_id, manifest.file_id, segment.text],
+                params![&segment_id, &manifest.file_id, &segment.text],
             )?;
         }
         Ok(())

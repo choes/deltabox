@@ -3,6 +3,7 @@ pub mod storage;
 
 mod backends;
 mod events;
+mod extractors;
 mod files;
 mod index;
 mod schema;
@@ -389,6 +390,34 @@ mod tests {
         assert!(!minio.config_json.contains("access"));
         assert!(!minio.config_json.contains("secret"));
         assert!(vault.storage_backend_by_id("minio").is_ok());
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_document_type_creates_skipped_index_job() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("draft.docx");
+        fs::write(&input, b"not a real docx yet\n")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/draft.docx".to_owned()),
+        })?;
+        assert_eq!(
+            manifest.mime,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
+        assert!(vault.list_index_jobs()?.is_empty());
+
+        let job = vault.enqueue_index_file(&manifest.file_id)?;
+        assert_eq!(job.status, "skipped");
+        assert_eq!(job.last_error.as_deref(), Some("unsupported_mime"));
 
         fs::remove_dir_all(root)?;
         Ok(())
