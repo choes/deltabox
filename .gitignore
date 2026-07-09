@@ -1,0 +1,4 @@
+/target/
+/.deltabox/
+*.sqlite3
+/docs/design.md
