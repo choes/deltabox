@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::extractors::{
@@ -10,6 +11,8 @@ use crate::extractors::{
 use crate::manifest::FileManifest;
 use crate::util::now_rfc3339;
 use crate::{IndexJobRecord, Vault};
+
+const DEFAULT_STALE_TIMEOUT_SECONDS: i64 = 600;
 
 #[derive(Debug, Clone)]
 pub struct IndexRunSummary {
@@ -92,7 +95,15 @@ impl Vault {
     }
 
     pub fn run_index_worker(&self, limit: u64) -> Result<IndexRunSummary> {
-        self.requeue_stale_running_tasks()?;
+        self.run_index_worker_with_stale_timeout(limit, DEFAULT_STALE_TIMEOUT_SECONDS)
+    }
+
+    pub fn run_index_worker_with_stale_timeout(
+        &self,
+        limit: u64,
+        stale_timeout_seconds: i64,
+    ) -> Result<IndexRunSummary> {
+        self.requeue_stale_running_tasks(stale_timeout_seconds)?;
         let tasks = self.pending_index_tasks(limit)?;
         let mut summary = IndexRunSummary {
             completed: 0,
@@ -108,6 +119,44 @@ impl Vault {
         }
 
         Ok(summary)
+    }
+
+    pub fn pause_index_job(&self, job_id: &str) -> Result<IndexJobRecord> {
+        self.get_index_job(job_id)?;
+        let now = now_rfc3339();
+        let conn = self.open_db()?;
+        conn.execute(
+            "UPDATE index_tasks
+             SET status = 'paused', updated_at = ?1
+             WHERE job_id = ?2 AND status IN ('pending', 'running', 'failed_retryable')",
+            params![now, job_id],
+        )?;
+        conn.execute(
+            "UPDATE index_jobs
+             SET status = 'paused', updated_at = ?1
+             WHERE job_id = ?2 AND status IN ('pending', 'running', 'failed_retryable')",
+            params![now, job_id],
+        )?;
+        self.get_index_job(job_id)
+    }
+
+    pub fn resume_index_job(&self, job_id: &str) -> Result<IndexJobRecord> {
+        self.get_index_job(job_id)?;
+        let now = now_rfc3339();
+        let conn = self.open_db()?;
+        conn.execute(
+            "UPDATE index_tasks
+             SET status = 'pending', updated_at = ?1
+             WHERE job_id = ?2 AND status = 'paused'",
+            params![now, job_id],
+        )?;
+        conn.execute(
+            "UPDATE index_jobs
+             SET status = 'pending', updated_at = ?1
+             WHERE job_id = ?2 AND status = 'paused'",
+            params![now, job_id],
+        )?;
+        self.get_index_job(job_id)
     }
 
     pub fn retry_index_job(&self, job_id: &str) -> Result<IndexJobRecord> {
@@ -412,21 +461,28 @@ impl Vault {
         Ok(())
     }
 
-    fn requeue_stale_running_tasks(&self) -> Result<()> {
+    fn requeue_stale_running_tasks(&self, stale_timeout_seconds: i64) -> Result<()> {
         let conn = self.open_db()?;
         let now = now_rfc3339();
+        let cutoff = stale_cutoff_rfc3339(stale_timeout_seconds)?;
+        let job_ids = {
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT job_id
+                 FROM index_tasks
+                 WHERE status = 'running' AND updated_at <= ?1",
+            )?;
+            let rows = stmt.query_map(params![cutoff], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
         conn.execute(
             "UPDATE index_tasks
              SET status = 'pending', updated_at = ?1
-             WHERE status = 'running'",
-            params![now],
+             WHERE status = 'running' AND updated_at <= ?2",
+            params![now, cutoff],
         )?;
-        conn.execute(
-            "UPDATE index_jobs
-             SET status = 'pending', updated_at = ?1
-             WHERE status = 'running'",
-            params![now],
-        )?;
+        for job_id in job_ids {
+            self.update_job_progress(&job_id)?;
+        }
         Ok(())
     }
 
@@ -562,4 +618,10 @@ fn row_to_index_task_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<IndexTa
         task_type: row.get(2)?,
         task_key: row.get(3)?,
     })
+}
+
+fn stale_cutoff_rfc3339(stale_timeout_seconds: i64) -> Result<String> {
+    let timeout = stale_timeout_seconds.max(0);
+    let cutoff = OffsetDateTime::now_utc() - Duration::seconds(timeout);
+    Ok(cutoff.format(&time::format_description::well_known::Rfc3339)?)
 }

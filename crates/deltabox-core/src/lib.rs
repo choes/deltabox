@@ -292,6 +292,93 @@ mod tests {
     }
 
     #[test]
+    fn index_job_pause_and_resume_controls_worker() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("pause.txt");
+        fs::write(&input, b"pause resume worker indexing\n")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/pause.txt".to_owned()),
+        })?;
+
+        let job = vault.enqueue_index_file(&manifest.file_id)?;
+        let paused = vault.pause_index_job(&job.job_id)?;
+        assert_eq!(paused.status, "paused");
+
+        let summary = vault.run_index_worker(10)?;
+        assert_eq!(summary.completed, 0);
+        assert!(vault.search_files("resume", false)?.is_empty());
+
+        let resumed = vault.resume_index_job(&job.job_id)?;
+        assert_eq!(resumed.status, "pending");
+
+        let summary = vault.run_index_worker(10)?;
+        assert_eq!(summary.completed, 1);
+        let jobs = vault.list_index_jobs()?;
+        let job = jobs
+            .iter()
+            .find(|candidate| candidate.job_id == job.job_id)
+            .expect("index job");
+        assert_eq!(job.status, "completed");
+        assert_eq!(vault.search_files("resume", false)?.len(), 1);
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn stale_running_tasks_requeue_only_after_timeout() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("stale.txt");
+        fs::write(&input, b"stale timeout worker indexing\n")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/stale.txt".to_owned()),
+        })?;
+        let job = vault.enqueue_index_file(&manifest.file_id)?;
+
+        let conn = vault.open_db()?;
+        conn.execute(
+            "UPDATE index_tasks SET status = 'running', updated_at = '9999-01-01T00:00:00Z' WHERE job_id = ?1",
+            [&job.job_id],
+        )?;
+        conn.execute(
+            "UPDATE index_jobs SET status = 'running', updated_at = '9999-01-01T00:00:00Z' WHERE job_id = ?1",
+            [&job.job_id],
+        )?;
+
+        let summary = vault.run_index_worker_with_stale_timeout(10, 600)?;
+        assert_eq!(summary.completed, 0);
+        assert!(vault.search_files("timeout", false)?.is_empty());
+
+        conn.execute(
+            "UPDATE index_tasks SET status = 'running', updated_at = '1970-01-01T00:00:00Z' WHERE job_id = ?1",
+            [&job.job_id],
+        )?;
+        conn.execute(
+            "UPDATE index_jobs SET status = 'running', updated_at = '1970-01-01T00:00:00Z' WHERE job_id = ?1",
+            [&job.job_id],
+        )?;
+
+        let summary = vault.run_index_worker_with_stale_timeout(10, 600)?;
+        assert_eq!(summary.completed, 1);
+        assert_eq!(vault.search_files("timeout", false)?.len(), 1);
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn copy_file_to_second_local_backend_adds_locations() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");

@@ -16,6 +16,7 @@
 - PDF text layer 索引，支持页码定位
 - 搜索结果片段增强
 - PDF 按页索引任务和可恢复进度
+- 索引任务 pause / resume 和 stale timeout
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -27,8 +28,7 @@
 ### 近期计划
 
 1. **索引任务增强**
-   - heartbeat / stale timeout
-   - pause / resume
+   - heartbeat
    - 文本按 chunk 拆分 task
    - 视频按媒体区间拆分 task
 
@@ -83,6 +83,7 @@
 - PDF text layer indexing with page locators
 - Detailed search result segments
 - Page-level PDF indexing tasks and resumable progress
+- Index task pause / resume and stale timeout
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations
@@ -94,8 +95,7 @@
 ### Near-Term Plan
 
 1. **Index Task Improvements**
-   - Heartbeat / stale timeout
-   - Pause / resume
+   - Heartbeat
    - Chunk-level tasks for text files
    - Media-range tasks for video
 

@@ -118,11 +118,19 @@ enum IndexCommand {
     Run {
         #[arg(long, default_value_t = 100)]
         limit: u64,
+        #[arg(long, default_value_t = 600)]
+        stale_timeout_seconds: i64,
     },
     Retry {
         job_id: String,
     },
     Cancel {
+        job_id: String,
+    },
+    Pause {
+        job_id: String,
+    },
+    Resume {
         job_id: String,
     },
 }
@@ -352,8 +360,12 @@ fn main() -> Result<()> {
                         );
                     }
                 }
-                IndexCommand::Run { limit } => {
-                    let summary = vault.run_index_worker(limit)?;
+                IndexCommand::Run {
+                    limit,
+                    stale_timeout_seconds,
+                } => {
+                    let summary =
+                        vault.run_index_worker_with_stale_timeout(limit, stale_timeout_seconds)?;
                     println!(
                         "completed={}\tfailed={}\tskipped={}",
                         summary.completed, summary.failed, summary.skipped
@@ -373,6 +385,30 @@ fn main() -> Result<()> {
                 }
                 IndexCommand::Cancel { job_id } => {
                     let job = vault.cancel_index_job(&job_id)?;
+                    println!(
+                        "{}\t{}\t{}\t{}/{}\t{}",
+                        job.job_id,
+                        job.file_id,
+                        job.status,
+                        job.completed_tasks,
+                        job.total_tasks,
+                        job.last_error.unwrap_or_default()
+                    );
+                }
+                IndexCommand::Pause { job_id } => {
+                    let job = vault.pause_index_job(&job_id)?;
+                    println!(
+                        "{}\t{}\t{}\t{}/{}\t{}",
+                        job.job_id,
+                        job.file_id,
+                        job.status,
+                        job.completed_tasks,
+                        job.total_tasks,
+                        job.last_error.unwrap_or_default()
+                    );
+                }
+                IndexCommand::Resume { job_id } => {
+                    let job = vault.resume_index_job(&job_id)?;
                     println!(
                         "{}\t{}\t{}\t{}/{}\t{}",
                         job.job_id,
