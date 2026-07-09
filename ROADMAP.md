@@ -14,6 +14,7 @@
 - UTF-8 文本文档全文索引
 - 通用文本提取器抽象
 - PDF text layer 索引，支持页码定位
+- 搜索结果片段增强
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -24,25 +25,20 @@
 
 ### 近期计划
 
-1. **搜索结果片段增强**
-   - 搜索结果返回页码和片段
-   - 返回命中的 `text_segments`
-   - 为自然语言搜索和 MCP 工具提供可解释结果
-
-2. **索引任务增强**
+1. **索引任务增强**
    - heartbeat / stale timeout
    - pause / resume
    - 更准确的 job progress
    - 按页、按片段、按媒体区间的 task 粒度
 
-3. **凭证保护升级**
+2. **凭证保护升级**
    - vault password
    - OS keychain
    - recovery key
    - key rotation
    - backend credential migration
 
-4. **MCP server 原型**
+3. **MCP server 原型**
    - `search_files`
    - `read_file_metadata`
    - `read_text_segments`
@@ -84,6 +80,7 @@
 - Full-text indexing for UTF-8 text documents
 - Generic text extractor abstraction
 - PDF text layer indexing with page locators
+- Detailed search result segments
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations
@@ -94,25 +91,20 @@
 
 ### Near-Term Plan
 
-1. **Search Result Segment Improvements**
-   - Return page and segment information in search results
-   - Return matched `text_segments`
-   - Provide explainable results for natural language search and MCP tools
-
-2. **Index Task Improvements**
+1. **Index Task Improvements**
    - Heartbeat / stale timeout
    - Pause / resume
    - More accurate job progress
    - Task granularity by page, segment, and media time range
 
-3. **Credential Protection Upgrade**
+2. **Credential Protection Upgrade**
    - Vault password
    - OS keychain integration
    - Recovery key
    - Key rotation
    - Backend credential migration
 
-4. **MCP Server Prototype**
+3. **MCP Server Prototype**
    - `search_files`
    - `read_file_metadata`
    - `read_text_segments`

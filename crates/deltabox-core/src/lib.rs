@@ -109,6 +109,23 @@ pub struct StorageVerifyRecord {
     pub message: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub file: FileRecord,
+    pub matches: Vec<SearchMatch>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchMatch {
+    pub match_kind: String,
+    pub source: Option<String>,
+    pub text: Option<String>,
+    pub page: Option<u64>,
+    pub line_start: Option<u64>,
+    pub line_end: Option<u64>,
+    pub score: Option<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -445,6 +462,22 @@ mod tests {
         let search = vault.search_files("library", false)?;
         assert_eq!(search.len(), 1);
         assert_eq!(search[0].file_id, manifest.file_id);
+
+        let detailed = vault.search_files_detailed("library", false)?;
+        assert_eq!(detailed.len(), 1);
+        assert_eq!(detailed[0].file.file_id, manifest.file_id);
+        let text_match = detailed[0]
+            .matches
+            .iter()
+            .find(|search_match| search_match.match_kind == "text")
+            .expect("text match");
+        assert_eq!(text_match.source.as_deref(), Some("pdf_text"));
+        assert_eq!(text_match.page, Some(1));
+        assert!(text_match
+            .text
+            .as_deref()
+            .unwrap_or_default()
+            .contains("library planning"));
 
         let conn = vault.open_db()?;
         let (source, page): (String, Option<u64>) = conn.query_row(

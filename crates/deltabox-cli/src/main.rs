@@ -35,6 +35,8 @@ enum Command {
         query: String,
         #[arg(long)]
         all: bool,
+        #[arg(long)]
+        details: bool,
     },
     Backend {
         #[command(subcommand)]
@@ -222,16 +224,35 @@ fn main() -> Result<()> {
             let manifest = vault.get_manifest(&file_id)?;
             println!("{}", serde_json_pretty(&manifest)?);
         }
-        Command::Search { query, all } => {
+        Command::Search {
+            query,
+            all,
+            details,
+        } => {
             let vault = Vault::open(&cli.vault)?;
-            for file in vault.search_files(&query, all)? {
-                println!(
-                    "{}\t{}\t{}\t{}",
-                    file.file_id,
-                    file.status.as_str(),
-                    file.size,
-                    file.logical_path
-                );
+            if details {
+                for result in vault.search_files_detailed(&query, all)? {
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        result.file.file_id,
+                        result.file.status.as_str(),
+                        result.file.size,
+                        result.file.logical_path
+                    );
+                    for search_match in result.matches {
+                        println!("  {}", format_search_match(&search_match));
+                    }
+                }
+            } else {
+                for file in vault.search_files(&query, all)? {
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        file.file_id,
+                        file.status.as_str(),
+                        file.size,
+                        file.logical_path
+                    );
+                }
             }
         }
         Command::Backend { command } => {
@@ -570,4 +591,21 @@ fn redact_backend_config(config_json: &str) -> String {
         }
     }
     value.to_string()
+}
+
+fn format_search_match(search_match: &deltabox_core::SearchMatch) -> String {
+    let mut parts = vec![search_match.match_kind.clone()];
+    if let Some(source) = &search_match.source {
+        parts.push(source.clone());
+    }
+    if let Some(page) = search_match.page {
+        parts.push(format!("page={page}"));
+    }
+    if let (Some(line_start), Some(line_end)) = (search_match.line_start, search_match.line_end) {
+        parts.push(format!("lines={line_start}-{line_end}"));
+    }
+    if let Some(text) = &search_match.text {
+        parts.push(text.clone());
+    }
+    parts.join("\t")
 }
