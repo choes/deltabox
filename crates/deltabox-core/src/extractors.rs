@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 
 use anyhow::Result;
 use quick_xml::events::Event;
@@ -329,71 +329,21 @@ fn segment_from_text(
 }
 
 fn extract_docx_document_text(bytes: &[u8]) -> Result<String> {
-    let cursor = Cursor::new(bytes);
-    let mut archive = ZipArchive::new(cursor)?;
-    let mut document = String::new();
-    match archive.by_name("word/document.xml") {
-        Ok(mut file) => file.read_to_string(&mut document)?,
-        Err(ZipError::FileNotFound) => return Ok(String::new()),
-        Err(error) => return Err(error.into()),
+    let mut archive = zip_archive(bytes)?;
+    let Some(document) = read_optional_zip_part(&mut archive, "word/document.xml")? else {
+        return Ok(String::new());
     };
-
-    let mut reader = Reader::from_str(&document);
-    reader.config_mut().trim_text(true);
-    let mut buffer = Vec::new();
-    let mut text = String::new();
-    let mut in_text = false;
-
-    loop {
-        match reader.read_event_into(&mut buffer)? {
-            Event::Start(event) => {
-                let name = event.name();
-                let local = local_xml_name(name.as_ref());
-                if local == b"t" {
-                    in_text = true;
-                }
-            }
-            Event::End(event) => {
-                let name = event.name();
-                let local = local_xml_name(name.as_ref());
-                if local == b"t" {
-                    in_text = false;
-                } else if local == b"p" && !text.ends_with('\n') {
-                    text.push('\n');
-                }
-            }
-            Event::Text(event) if in_text => {
-                text.push_str(&event.unescape()?);
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buffer.clear();
-    }
-
-    Ok(text)
+    extract_xml_text_nodes(&document, b"t", Some(b"p"))
 }
 
 fn extract_xlsx_workbook_text(bytes: &[u8]) -> Result<String> {
-    let cursor = Cursor::new(bytes);
-    let mut archive = ZipArchive::new(cursor)?;
+    let mut archive = zip_archive(bytes)?;
     let shared_strings = read_xlsx_shared_strings(&mut archive)?;
-    let worksheet_names = (0..archive.len())
-        .filter_map(|index| {
-            archive
-                .by_index(index)
-                .ok()
-                .map(|file| file.name().to_owned())
-        })
-        .filter(|name| name.starts_with("xl/worksheets/") && name.ends_with(".xml"))
-        .collect::<Vec<_>>();
+    let worksheet_names = list_zip_parts(&mut archive, "xl/worksheets/", ".xml")?;
 
     let mut text = String::new();
     for worksheet_name in worksheet_names {
-        let mut worksheet = String::new();
-        archive
-            .by_name(&worksheet_name)?
-            .read_to_string(&mut worksheet)?;
+        let worksheet = read_zip_part(&mut archive, &worksheet_name)?;
         let worksheet_text = parse_xlsx_worksheet_text(&worksheet, &shared_strings)?;
         if !worksheet_text.trim().is_empty() {
             if !text.is_empty() && !text.ends_with('\n') {
@@ -406,14 +356,10 @@ fn extract_xlsx_workbook_text(bytes: &[u8]) -> Result<String> {
     Ok(text)
 }
 
-fn read_xlsx_shared_strings<R: Read + std::io::Seek>(
-    archive: &mut ZipArchive<R>,
-) -> Result<Vec<String>> {
-    let Ok(mut file) = archive.by_name("xl/sharedStrings.xml") else {
+fn read_xlsx_shared_strings<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<Vec<String>> {
+    let Some(xml) = read_optional_zip_part(archive, "xl/sharedStrings.xml")? else {
         return Ok(Vec::new());
     };
-    let mut xml = String::new();
-    file.read_to_string(&mut xml)?;
     parse_xlsx_shared_strings(&xml)
 }
 
@@ -538,15 +484,9 @@ fn parse_xlsx_worksheet_text(xml: &str, shared_strings: &[String]) -> Result<Str
 }
 
 fn pptx_slide_names(bytes: &[u8]) -> Result<Vec<String>> {
-    let cursor = Cursor::new(bytes);
-    let mut archive = ZipArchive::new(cursor)?;
-    let mut slide_names = (0..archive.len())
-        .filter_map(|index| {
-            archive
-                .by_index(index)
-                .ok()
-                .map(|file| file.name().to_owned())
-        })
+    let mut archive = zip_archive(bytes)?;
+    let mut slide_names = list_zip_parts(&mut archive, "ppt/slides/slide", ".xml")?
+        .into_iter()
         .filter(|name| {
             name.starts_with("ppt/slides/slide")
                 && name.ends_with(".xml")
@@ -565,14 +505,57 @@ fn slide_number_from_name(name: &str) -> Option<u64> {
 }
 
 fn extract_pptx_slide_text(bytes: &[u8], slide_name: &str) -> Result<String> {
-    let cursor = Cursor::new(bytes);
-    let mut archive = ZipArchive::new(cursor)?;
-    let mut slide = String::new();
-    archive.by_name(slide_name)?.read_to_string(&mut slide)?;
-    parse_pptx_slide_text(&slide)
+    let mut archive = zip_archive(bytes)?;
+    let slide = read_zip_part(&mut archive, slide_name)?;
+    extract_xml_text_nodes(&slide, b"t", Some(b"t"))
 }
 
-fn parse_pptx_slide_text(xml: &str) -> Result<String> {
+fn zip_archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {
+    Ok(ZipArchive::new(Cursor::new(bytes))?)
+}
+
+fn read_zip_part<R: Read + Seek>(archive: &mut ZipArchive<R>, name: &str) -> Result<String> {
+    let mut xml = String::new();
+    archive.by_name(name)?.read_to_string(&mut xml)?;
+    Ok(xml)
+}
+
+fn read_optional_zip_part<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<String>> {
+    match archive.by_name(name) {
+        Ok(mut file) => {
+            let mut xml = String::new();
+            file.read_to_string(&mut xml)?;
+            Ok(Some(xml))
+        }
+        Err(ZipError::FileNotFound) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn list_zip_parts<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    prefix: &str,
+    suffix: &str,
+) -> Result<Vec<String>> {
+    let mut names = Vec::new();
+    for index in 0..archive.len() {
+        let file = archive.by_index(index)?;
+        let name = file.name();
+        if name.starts_with(prefix) && name.ends_with(suffix) {
+            names.push(name.to_owned());
+        }
+    }
+    Ok(names)
+}
+
+fn extract_xml_text_nodes(
+    xml: &str,
+    text_node: &[u8],
+    newline_after_node: Option<&[u8]>,
+) -> Result<String> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
@@ -584,15 +567,17 @@ fn parse_pptx_slide_text(xml: &str) -> Result<String> {
             Event::Start(event) => {
                 let name = event.name();
                 let local = local_xml_name(name.as_ref());
-                if local == b"t" {
+                if local == text_node {
                     in_text = true;
                 }
             }
             Event::End(event) => {
                 let name = event.name();
                 let local = local_xml_name(name.as_ref());
-                if local == b"t" {
+                if local == text_node {
                     in_text = false;
+                }
+                if newline_after_node.is_some_and(|node| local == node) {
                     if !text.ends_with('\n') {
                         text.push('\n');
                     }
