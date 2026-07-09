@@ -20,6 +20,7 @@
 - PPTX 幻灯片文本索引
 - PPTX speaker notes 索引
 - 图片元数据索引，支持 EXIF / GPS
+- 视频基础元数据索引
 - Office 文档索引容错
 - 搜索结果片段增强
 - PDF 按页索引任务和可恢复进度
@@ -98,6 +99,7 @@
 - PPTX slide text indexing
 - PPTX speaker notes indexing
 - Image metadata indexing with EXIF / GPS
+- Basic video metadata indexing
 - Office indexing fault tolerance
 - Detailed search result segments
 - Page-level PDF indexing tasks and resumable progress

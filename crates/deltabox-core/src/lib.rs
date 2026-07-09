@@ -1083,6 +1083,76 @@ mod tests {
     }
 
     #[test]
+    fn mp4_video_metadata_is_indexed() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("clip.mp4");
+        fs::write(
+            &input,
+            minimal_mp4(1920, 1080, "avc1", 90_000, 270_000, 3_823_927_872),
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/videos/clip.mp4".to_owned()),
+        })?;
+        assert_eq!(manifest.mime, "video/mp4");
+        assert_eq!(vault.search_files("1920x1080", false)?.len(), 1);
+        assert_eq!(vault.search_files("avc1", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].source, "video_metadata");
+        assert_eq!(segments[0].task_key, "video:metadata");
+        assert!(segments[0].text.contains("format: mp4"));
+        assert!(segments[0].text.contains("major_brand: isom"));
+        assert!(segments[0].text.contains("duration_seconds: 3.000"));
+        assert!(segments[0]
+            .text
+            .contains("creation_time: 2025-03-04T10:11:12Z"));
+        assert!(segments[0].text.contains("width: 1920"));
+        assert!(segments[0].text.contains("height: 1080"));
+        assert!(segments[0].text.contains("video_codec: avc1"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_video_import_succeeds_and_records_index_error() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("broken.mp4");
+        fs::write(&input, b"not an mp4")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/videos/broken.mp4".to_owned()),
+        })?;
+        assert_eq!(vault.list_files(false)?.len(), 1);
+        assert_eq!(vault.text_segments_for_file(&manifest.file_id)?.len(), 0);
+
+        let jobs = vault.list_index_jobs()?;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].file_id, manifest.file_id);
+        assert_eq!(jobs[0].status, "failed_permanent");
+        assert!(jobs[0]
+            .last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("planning_failed"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn pdf_text_layer_is_indexed_with_page_locator() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");
@@ -1518,6 +1588,70 @@ mod tests {
         jpeg.extend_from_slice(&[3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0]);
         jpeg.extend_from_slice(&[0xff, 0xd9]);
         Ok(jpeg)
+    }
+
+    fn minimal_mp4(
+        width: u32,
+        height: u32,
+        codec: &str,
+        timescale: u32,
+        duration: u32,
+        creation_time: u32,
+    ) -> Vec<u8> {
+        let mut ftyp = b"isom".to_vec();
+        ftyp.extend_from_slice(&0_u32.to_be_bytes());
+        ftyp.extend_from_slice(b"isommp42");
+
+        let mut mvhd = vec![0, 0, 0, 0];
+        mvhd.extend_from_slice(&creation_time.to_be_bytes());
+        mvhd.extend_from_slice(&creation_time.to_be_bytes());
+        mvhd.extend_from_slice(&timescale.to_be_bytes());
+        mvhd.extend_from_slice(&duration.to_be_bytes());
+
+        let mut tkhd = vec![0, 0, 0, 7];
+        tkhd.extend_from_slice(&[0; 76]);
+        tkhd.extend_from_slice(&(width << 16).to_be_bytes());
+        tkhd.extend_from_slice(&(height << 16).to_be_bytes());
+
+        let mut hdlr = vec![0, 0, 0, 0];
+        hdlr.extend_from_slice(&0_u32.to_be_bytes());
+        hdlr.extend_from_slice(b"vide");
+
+        let codec = codec.as_bytes();
+        assert_eq!(codec.len(), 4);
+        let mut sample_entry = 16_u32.to_be_bytes().to_vec();
+        sample_entry.extend_from_slice(codec);
+        sample_entry.extend_from_slice(&[0; 8]);
+        let mut stsd = vec![0, 0, 0, 0];
+        stsd.extend_from_slice(&1_u32.to_be_bytes());
+        stsd.extend_from_slice(&sample_entry);
+
+        let stbl = mp4_box("stbl", &[mp4_leaf_box("stsd", &stsd)]);
+        let minf = mp4_box("minf", &[stbl]);
+        let mdia = mp4_box("mdia", &[mp4_leaf_box("hdlr", &hdlr), minf]);
+        let trak = mp4_box("trak", &[mp4_leaf_box("tkhd", &tkhd), mdia]);
+        let moov = mp4_box("moov", &[mp4_leaf_box("mvhd", &mvhd), trak]);
+
+        let mut mp4 = mp4_leaf_box("ftyp", &ftyp);
+        mp4.extend_from_slice(&moov);
+        mp4
+    }
+
+    fn mp4_leaf_box(name: &str, payload: &[u8]) -> Vec<u8> {
+        let mut data = ((8 + payload.len()) as u32).to_be_bytes().to_vec();
+        data.extend_from_slice(name.as_bytes());
+        data.extend_from_slice(payload);
+        data
+    }
+
+    fn mp4_box(name: &str, payload_parts: &[Vec<u8>]) -> Vec<u8> {
+        let payload_len = payload_parts.iter().map(Vec::len).sum::<usize>();
+        let mut data = ((8 + payload_len) as u32).to_be_bytes().to_vec();
+        data.extend_from_slice(name.as_bytes());
+        for part in payload_parts {
+            data.extend_from_slice(part);
+        }
+        data
     }
 
     fn minimal_zip_file(name: &str, content: &str) -> Result<Vec<u8>> {

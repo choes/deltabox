@@ -4,6 +4,7 @@ use anyhow::Result;
 use exif::{In, Tag, Value};
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use time::OffsetDateTime;
 use zip::result::ZipError;
 use zip::ZipArchive;
 
@@ -50,6 +51,7 @@ pub(crate) fn extractor_for_manifest(manifest: &FileManifest) -> Option<Box<dyn 
         Box::new(XlsxTextExtractor),
         Box::new(PptxTextExtractor),
         Box::new(ImageMetadataExtractor),
+        Box::new(VideoMetadataExtractor),
     ];
     extractors
         .into_iter()
@@ -379,6 +381,55 @@ impl TextExtractor for ImageMetadataExtractor {
         let text = render_metadata_text(&metadata);
         Ok(vec![segment_from_text(
             "image_metadata".to_owned(),
+            task.task_key.clone(),
+            0,
+            TextSegmentDraft {
+                char_end: text.len() as u64,
+                text,
+                line_start: 1,
+                line_end: metadata.len() as u64,
+                char_start: 0,
+            },
+        )])
+    }
+}
+
+struct VideoMetadataExtractor;
+
+impl TextExtractor for VideoMetadataExtractor {
+    fn supports(&self, manifest: &FileManifest) -> bool {
+        matches!(manifest.mime.as_str(), "video/mp4" | "video/quicktime")
+    }
+
+    fn plan_tasks(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
+        let metadata = extract_video_metadata(bytes)?;
+        if metadata.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Ok(vec![ExtractionTask {
+                task_key: "video:metadata".to_owned(),
+            }])
+        }
+    }
+
+    fn extract_task(
+        &self,
+        manifest: &FileManifest,
+        bytes: &[u8],
+        task: &ExtractionTask,
+    ) -> Result<Vec<ExtractedTextSegment>> {
+        if task.task_key != "video:metadata" {
+            return Err(anyhow::anyhow!(
+                "unsupported video metadata extraction task: {}",
+                task.task_key
+            ));
+        }
+        let mut metadata = extract_video_metadata(bytes)?;
+        metadata.push(("mime".to_owned(), manifest.mime.clone()));
+        metadata.push(("size_bytes".to_owned(), manifest.size.to_string()));
+        let text = render_metadata_text(&metadata);
+        Ok(vec![segment_from_text(
+            "video_metadata".to_owned(),
             task.task_key.clone(),
             0,
             TextSegmentDraft {
@@ -889,6 +940,256 @@ fn exif_gps_coordinate(
         }
     }
     Some(coordinate)
+}
+
+#[derive(Debug, Clone)]
+struct IsoBox {
+    name: [u8; 4],
+    payload_start: usize,
+    payload_end: usize,
+}
+
+#[derive(Debug, Default)]
+struct VideoTrackMetadata {
+    width: Option<u32>,
+    height: Option<u32>,
+    codec: Option<String>,
+}
+
+fn extract_video_metadata(bytes: &[u8]) -> Result<Vec<(String, String)>> {
+    let root = iso_boxes(bytes, 0, bytes.len())?;
+    let ftyp = root
+        .iter()
+        .find(|candidate| candidate.name == *b"ftyp")
+        .ok_or_else(|| anyhow::anyhow!("MP4/MOV ftyp box not found"))?;
+    let mut metadata = parse_ftyp_metadata(&bytes[ftyp.payload_start..ftyp.payload_end])?;
+
+    let moov = root
+        .iter()
+        .find(|candidate| candidate.name == *b"moov")
+        .ok_or_else(|| anyhow::anyhow!("MP4/MOV moov box not found"))?;
+    let moov_children = iso_boxes(bytes, moov.payload_start, moov.payload_end)?;
+    if let Some(mvhd) = moov_children
+        .iter()
+        .find(|candidate| candidate.name == *b"mvhd")
+    {
+        metadata.extend(parse_mvhd_metadata(
+            &bytes[mvhd.payload_start..mvhd.payload_end],
+        )?);
+    }
+    if let Some(track) = parse_video_track_metadata(bytes, &moov_children)? {
+        if let (Some(width), Some(height)) = (track.width, track.height) {
+            metadata.push(("width".to_owned(), width.to_string()));
+            metadata.push(("height".to_owned(), height.to_string()));
+            metadata.push(("dimensions".to_owned(), format!("{width}x{height}")));
+        }
+        if let Some(codec) = track.codec {
+            metadata.push(("video_codec".to_owned(), codec));
+        }
+    }
+
+    Ok(metadata)
+}
+
+fn parse_ftyp_metadata(payload: &[u8]) -> Result<Vec<(String, String)>> {
+    if payload.len() < 8 {
+        return Err(anyhow::anyhow!("invalid ftyp box"));
+    }
+    let major_brand = fourcc(&payload[0..4]);
+    let mut metadata = vec![
+        (
+            "format".to_owned(),
+            if major_brand == "qt" { "mov" } else { "mp4" }.to_owned(),
+        ),
+        ("major_brand".to_owned(), major_brand),
+    ];
+    let compatible_brands = payload[8..].chunks_exact(4).map(fourcc).collect::<Vec<_>>();
+    if !compatible_brands.is_empty() {
+        metadata.push(("compatible_brands".to_owned(), compatible_brands.join(",")));
+    }
+    Ok(metadata)
+}
+
+fn parse_mvhd_metadata(payload: &[u8]) -> Result<Vec<(String, String)>> {
+    if payload.len() < 20 {
+        return Err(anyhow::anyhow!("invalid mvhd box"));
+    }
+    let version = payload[0];
+    let (creation_time, timescale, duration) = if version == 1 {
+        if payload.len() < 32 {
+            return Err(anyhow::anyhow!("invalid mvhd version 1 box"));
+        }
+        (
+            u64::from_be_bytes(payload[4..12].try_into()?),
+            u32::from_be_bytes(payload[20..24].try_into()?),
+            u64::from_be_bytes(payload[24..32].try_into()?),
+        )
+    } else {
+        (
+            u32::from_be_bytes(payload[4..8].try_into()?) as u64,
+            u32::from_be_bytes(payload[12..16].try_into()?),
+            u32::from_be_bytes(payload[16..20].try_into()?) as u64,
+        )
+    };
+
+    let mut metadata = Vec::new();
+    if timescale > 0 {
+        metadata.push((
+            "duration_seconds".to_owned(),
+            format!("{:.3}", duration as f64 / timescale as f64),
+        ));
+    }
+    if let Some(datetime) = mp4_time_to_rfc3339(creation_time) {
+        metadata.push(("creation_time".to_owned(), datetime));
+    }
+    Ok(metadata)
+}
+
+fn parse_video_track_metadata(
+    bytes: &[u8],
+    moov_children: &[IsoBox],
+) -> Result<Option<VideoTrackMetadata>> {
+    for trak in moov_children
+        .iter()
+        .filter(|candidate| candidate.name == *b"trak")
+    {
+        let trak_children = iso_boxes(bytes, trak.payload_start, trak.payload_end)?;
+        if track_handler(bytes, &trak_children)? != Some("vide".to_owned()) {
+            continue;
+        }
+        let mut metadata = VideoTrackMetadata::default();
+        if let Some(tkhd) = trak_children
+            .iter()
+            .find(|candidate| candidate.name == *b"tkhd")
+        {
+            let (width, height) =
+                parse_tkhd_dimensions(&bytes[tkhd.payload_start..tkhd.payload_end])?;
+            metadata.width = width;
+            metadata.height = height;
+        }
+        metadata.codec = track_codec(bytes, &trak_children)?;
+        return Ok(Some(metadata));
+    }
+    Ok(None)
+}
+
+fn track_handler(bytes: &[u8], trak_children: &[IsoBox]) -> Result<Option<String>> {
+    let Some(mdia) = trak_children
+        .iter()
+        .find(|candidate| candidate.name == *b"mdia")
+    else {
+        return Ok(None);
+    };
+    let mdia_children = iso_boxes(bytes, mdia.payload_start, mdia.payload_end)?;
+    let Some(hdlr) = mdia_children
+        .iter()
+        .find(|candidate| candidate.name == *b"hdlr")
+    else {
+        return Ok(None);
+    };
+    let payload = &bytes[hdlr.payload_start..hdlr.payload_end];
+    if payload.len() < 12 {
+        return Ok(None);
+    }
+    Ok(Some(fourcc(&payload[8..12])))
+}
+
+fn track_codec(bytes: &[u8], trak_children: &[IsoBox]) -> Result<Option<String>> {
+    let Some(mdia) = trak_children
+        .iter()
+        .find(|candidate| candidate.name == *b"mdia")
+    else {
+        return Ok(None);
+    };
+    let mdia_children = iso_boxes(bytes, mdia.payload_start, mdia.payload_end)?;
+    let Some(minf) = mdia_children
+        .iter()
+        .find(|candidate| candidate.name == *b"minf")
+    else {
+        return Ok(None);
+    };
+    let minf_children = iso_boxes(bytes, minf.payload_start, minf.payload_end)?;
+    let Some(stbl) = minf_children
+        .iter()
+        .find(|candidate| candidate.name == *b"stbl")
+    else {
+        return Ok(None);
+    };
+    let stbl_children = iso_boxes(bytes, stbl.payload_start, stbl.payload_end)?;
+    let Some(stsd) = stbl_children
+        .iter()
+        .find(|candidate| candidate.name == *b"stsd")
+    else {
+        return Ok(None);
+    };
+    let payload = &bytes[stsd.payload_start..stsd.payload_end];
+    if payload.len() < 16 {
+        return Ok(None);
+    }
+    Ok(Some(fourcc(&payload[12..16])))
+}
+
+fn parse_tkhd_dimensions(payload: &[u8]) -> Result<(Option<u32>, Option<u32>)> {
+    if payload.len() < 8 {
+        return Ok((None, None));
+    }
+    let width_fixed = u32::from_be_bytes(payload[payload.len() - 8..payload.len() - 4].try_into()?);
+    let height_fixed = u32::from_be_bytes(payload[payload.len() - 4..].try_into()?);
+    let width = width_fixed >> 16;
+    let height = height_fixed >> 16;
+    Ok(((width > 0).then_some(width), (height > 0).then_some(height)))
+}
+
+fn iso_boxes(bytes: &[u8], start: usize, end: usize) -> Result<Vec<IsoBox>> {
+    let mut boxes = Vec::new();
+    let mut offset = start;
+    while offset + 8 <= end {
+        let size32 = u32::from_be_bytes(bytes[offset..offset + 4].try_into()?) as u64;
+        let mut header_size = 8_usize;
+        let size = if size32 == 1 {
+            if offset + 16 > end {
+                return Err(anyhow::anyhow!("invalid extended MP4 box size"));
+            }
+            header_size = 16;
+            u64::from_be_bytes(bytes[offset + 8..offset + 16].try_into()?)
+        } else if size32 == 0 {
+            (end - offset) as u64
+        } else {
+            size32
+        };
+        if size < header_size as u64 {
+            return Err(anyhow::anyhow!("invalid MP4 box size"));
+        }
+        let box_end = offset
+            .checked_add(size as usize)
+            .ok_or_else(|| anyhow::anyhow!("MP4 box size overflow"))?;
+        if box_end > end {
+            return Err(anyhow::anyhow!("MP4 box exceeds parent bounds"));
+        }
+        boxes.push(IsoBox {
+            name: bytes[offset + 4..offset + 8].try_into()?,
+            payload_start: offset + header_size,
+            payload_end: box_end,
+        });
+        offset = box_end;
+    }
+    Ok(boxes)
+}
+
+fn fourcc(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .trim_end_matches(' ')
+        .to_owned()
+}
+
+fn mp4_time_to_rfc3339(seconds_since_1904: u64) -> Option<String> {
+    const MP4_UNIX_EPOCH_OFFSET: i128 = 2_082_844_800;
+    let unix_seconds = seconds_since_1904 as i128 - MP4_UNIX_EPOCH_OFFSET;
+    let unix_seconds = i64::try_from(unix_seconds).ok()?;
+    OffsetDateTime::from_unix_timestamp(unix_seconds)
+        .ok()?
+        .format(&time::format_description::well_known::Rfc3339)
+        .ok()
 }
 
 fn zip_archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {
