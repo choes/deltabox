@@ -17,35 +17,31 @@
 - storage copy / move / verify / locations
 - 基础 replica policy 写入 manifest
 - S3-compatible backend
+- 真实 MinIO / S3 集成测试
 - S3 backend 凭证本地加密保存
 
 ### 近期计划
 
-1. **真实 MinIO / S3 集成测试**
-   - 使用 MinIO 验证 `add-s3 -> copy -> verify -> move -> restore`
-   - 增加 ignored integration test
-   - 明确 endpoint、path-style、prefix 的兼容性
-
-2. **PDF 文本索引**
+1. **PDF 文本索引**
    - 解析 PDF text layer
    - 按页生成 `text_segments`
    - 搜索结果返回页码和片段
    - 大 PDF 支持分页任务和断点续跑
 
-3. **索引任务增强**
+2. **索引任务增强**
    - heartbeat / stale timeout
    - pause / resume
    - 更准确的 job progress
    - 按页、按片段、按媒体区间的 task 粒度
 
-4. **凭证保护升级**
+3. **凭证保护升级**
    - vault password
    - OS keychain
    - recovery key
    - key rotation
    - backend credential migration
 
-5. **MCP server 原型**
+4. **MCP server 原型**
    - `search_files`
    - `read_file_metadata`
    - `read_text_segments`
@@ -90,35 +86,31 @@
 - Storage copy / move / verify / locations
 - Basic replica policy stored in manifests
 - S3-compatible backend
+- Real MinIO / S3 integration test
 - Local encryption for S3 backend credentials
 
 ### Near-Term Plan
 
-1. **Real MinIO / S3 Integration Tests**
-   - Validate `add-s3 -> copy -> verify -> move -> restore` with MinIO
-   - Add ignored integration tests
-   - Clarify endpoint, path-style, and prefix compatibility
-
-2. **PDF Text Indexing**
+1. **PDF Text Indexing**
    - Extract PDF text layers
    - Generate page-level `text_segments`
    - Return page and segment information in search results
    - Support page-level tasks and resumable indexing for large PDFs
 
-3. **Index Task Improvements**
+2. **Index Task Improvements**
    - Heartbeat / stale timeout
    - Pause / resume
    - More accurate job progress
    - Task granularity by page, segment, and media time range
 
-4. **Credential Protection Upgrade**
+3. **Credential Protection Upgrade**
    - Vault password
    - OS keychain integration
    - Recovery key
    - Key rotation
    - Backend credential migration
 
-5. **MCP Server Prototype**
+4. **MCP Server Prototype**
    - `search_files`
    - `read_file_metadata`
    - `read_text_segments`

@@ -194,7 +194,7 @@ impl Vault {
         Ok(manifest)
     }
 
-    fn read_chunk_from_any_location(
+    pub(crate) fn read_chunk_from_any_location(
         &self,
         chunk_id: &str,
         manifest: &FileManifest,

@@ -278,12 +278,11 @@ impl Vault {
                 manifest.file_id
             ));
         }
-        let backend = LocalStorage::new("local", self.chunk_dir.clone());
         let mut chunks = manifest.chunks.clone();
         chunks.sort_by_key(|chunk| chunk.offset);
         chunks
             .into_iter()
-            .map(|chunk| backend.get_chunk(&chunk.chunk_id))
+            .map(|chunk| self.read_chunk_from_any_location(&chunk.chunk_id, manifest))
             .collect()
     }
 
