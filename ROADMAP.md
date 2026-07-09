@@ -54,6 +54,11 @@
 - 视频关键帧和语音转文字索引
 - 后台 worker 守护进程
 - 本地桌面应用原型
+- 大文件跨 backend 分布式存储
+  - 按 chunk 将单个文件分布到多个 backend
+  - 支持按容量、成本、可用性和用户策略选择 backend
+  - restore 时从多个 backend 拉取 chunk 并重组文件
+  - 后续支持并行上传/下载
 - 存储策略再平衡器
 - S3-compatible backend 稳定性增强
 - WebDAV backend
@@ -121,6 +126,11 @@
 - Video keyframe and ASR text indexing
 - Background worker daemon
 - Local desktop app prototype
+- Large-file cross-backend distributed storage
+  - Distribute chunks of one file across multiple backends
+  - Choose backends by capacity, cost, availability, and user policy
+  - Restore files by reading chunks from multiple backends
+  - Add parallel upload/download later
 - Storage policy rebalancer
 - S3-compatible backend hardening
 - WebDAV backend
