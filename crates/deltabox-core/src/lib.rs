@@ -149,6 +149,7 @@ pub struct TextSegmentRecord {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::{Cursor, Write};
 
     use anyhow::Result;
     use uuid::Uuid;
@@ -585,13 +586,19 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_document_type_creates_skipped_index_job() -> Result<()> {
+    fn docx_text_is_indexed_from_document_xml() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");
         fs::create_dir_all(&input_dir)?;
 
         let input = input_dir.join("draft.docx");
-        fs::write(&input, b"not a real docx yet\n")?;
+        fs::write(
+            &input,
+            minimal_docx_with_paragraphs(&[
+                "DeltaBox DOCX library planning notes",
+                "Table-like project budget text",
+            ])?,
+        )?;
 
         let vault = Vault::init(&root)?;
         let manifest = vault.add_file(AddOptions {
@@ -602,11 +609,51 @@ mod tests {
             manifest.mime,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         );
-        assert!(vault.list_index_jobs()?.is_empty());
+        assert_eq!(vault.search_files("library planning", false)?.len(), 1);
 
-        let job = vault.enqueue_index_file(&manifest.file_id)?;
-        assert_eq!(job.status, "skipped");
-        assert_eq!(job.last_error.as_deref(), Some("unsupported_mime"));
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].source, "docx_text");
+        assert!(segments[0].text.contains("DOCX library planning"));
+        assert!(segments[0].text.contains("project budget"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn xlsx_text_is_indexed_from_shared_strings_and_worksheets() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("budget.xlsx");
+        fs::write(
+            &input,
+            minimal_xlsx_with_rows(&[
+                &["DeltaBox XLSX library budget", "Q1 planning"],
+                &["inline worksheet note", "128"],
+            ])?,
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/budget.xlsx".to_owned()),
+        })?;
+        assert_eq!(
+            manifest.mime,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        assert_eq!(vault.search_files("library budget", false)?.len(), 1);
+        assert_eq!(vault.search_files("worksheet note", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].source, "xlsx_text");
+        assert!(segments[0].text.contains("XLSX library budget"));
+        assert!(segments[0].text.contains("inline worksheet note"));
+        assert!(segments[0].text.contains("128"));
 
         fs::remove_dir_all(root)?;
         Ok(())
@@ -774,5 +821,91 @@ mod tests {
             .as_bytes(),
         );
         pdf
+    }
+
+    fn minimal_docx_with_paragraphs(paragraphs: &[&str]) -> Result<Vec<u8>> {
+        let mut xml = String::from(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+"#,
+        );
+        for paragraph in paragraphs {
+            xml.push_str("    <w:p><w:r><w:t>");
+            xml.push_str(&escape_xml_text(paragraph));
+            xml.push_str("</w:t></w:r></w:p>\n");
+        }
+        xml.push_str("  </w:body>\n</w:document>\n");
+
+        let cursor = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("word/document.xml", options)?;
+        writer.write_all(xml.as_bytes())?;
+        Ok(writer.finish()?.into_inner())
+    }
+
+    fn minimal_xlsx_with_rows(rows: &[&[&str]]) -> Result<Vec<u8>> {
+        let shared_strings = rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .enumerate()
+            .map(|(_index, value)| format!(r#"<si><t>{}</t></si>"#, escape_xml_text(value)))
+            .collect::<String>();
+        let mut sheet = String::from(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+"#,
+        );
+        let mut shared_index = 0_usize;
+        for (row_index, row) in rows.iter().enumerate() {
+            sheet.push_str(&format!(r#"    <row r="{}">"#, row_index + 1));
+            for (column_index, value) in row.iter().enumerate() {
+                let column = (b'A' + column_index as u8) as char;
+                if row_index == 1 && column_index == 0 {
+                    sheet.push_str(&format!(
+                        r#"<c r="{column}{}" t="inlineStr"><is><t>{}</t></is></c>"#,
+                        row_index + 1,
+                        escape_xml_text(value)
+                    ));
+                } else {
+                    sheet.push_str(&format!(
+                        r#"<c r="{column}{}" t="s"><v>{shared_index}</v></c>"#,
+                        row_index + 1
+                    ));
+                }
+                shared_index += 1;
+            }
+            sheet.push_str("</row>\n");
+        }
+        sheet.push_str("  </sheetData>\n</worksheet>\n");
+
+        let shared = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{0}" uniqueCount="{0}">
+{shared_strings}
+</sst>
+"#,
+            shared_index
+        );
+
+        let cursor = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("xl/sharedStrings.xml", options)?;
+        writer.write_all(shared.as_bytes())?;
+        writer.start_file("xl/worksheets/sheet1.xml", options)?;
+        writer.write_all(sheet.as_bytes())?;
+        Ok(writer.finish()?.into_inner())
+    }
+
+    fn escape_xml_text(value: &str) -> String {
+        value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 }
