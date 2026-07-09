@@ -38,7 +38,7 @@ pub struct AddOptions {
     pub logical_path: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct FileRecord {
     pub file_id: String,
     pub name: String,
@@ -50,7 +50,7 @@ pub struct FileRecord {
     pub trashed_at: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TrashRecord {
     pub file_id: String,
     pub name: String,
@@ -59,7 +59,7 @@ pub struct TrashRecord {
     pub trashed_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TagRecord {
     pub tag_id: String,
     pub name: String,
@@ -69,7 +69,7 @@ pub struct TagRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct IndexJobRecord {
     pub job_id: String,
     pub file_id: String,
@@ -83,7 +83,7 @@ pub struct IndexJobRecord {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StorageBackendRecord {
     pub backend_id: String,
     pub backend_type: String,
@@ -93,7 +93,7 @@ pub struct StorageBackendRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ChunkLocationRecord {
     pub chunk_id: String,
     pub backend_id: String,
@@ -101,7 +101,7 @@ pub struct ChunkLocationRecord {
     pub status: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct StorageVerifyRecord {
     pub chunk_id: String,
     pub backend_id: String,
@@ -109,13 +109,13 @@ pub struct StorageVerifyRecord {
     pub message: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchResult {
     pub file: FileRecord,
     pub matches: Vec<SearchMatch>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchMatch {
     pub match_kind: String,
     pub source: Option<String>,

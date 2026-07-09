@@ -30,6 +30,8 @@ enum Command {
     },
     Info {
         file_id: String,
+        #[arg(long)]
+        json: bool,
     },
     Search {
         query: String,
@@ -37,6 +39,8 @@ enum Command {
         all: bool,
         #[arg(long)]
         details: bool,
+        #[arg(long)]
+        json: bool,
     },
     Backend {
         #[command(subcommand)]
@@ -102,6 +106,8 @@ enum TagCommand {
     },
     File {
         file_id: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -171,6 +177,8 @@ enum StorageCommand {
     },
     Locations {
         file_id: String,
+        #[arg(long)]
+        json: bool,
     },
     Verify {
         file_id: String,
@@ -227,18 +235,27 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Command::Info { file_id } => {
+        Command::Info { file_id, json } => {
             let vault = Vault::open(&cli.vault)?;
             let manifest = vault.get_manifest(&file_id)?;
-            println!("{}", serde_json_pretty(&manifest)?);
+            if json {
+                print_json(&manifest)?;
+            } else {
+                println!("{}", serde_json_pretty(&manifest)?);
+            }
         }
         Command::Search {
             query,
             all,
             details,
+            json,
         } => {
             let vault = Vault::open(&cli.vault)?;
-            if details {
+            if json && details {
+                print_json(&vault.search_files_detailed(&query, all)?)?;
+            } else if json {
+                print_json(&vault.search_files(&query, all)?)?;
+            } else if details {
                 for result in vault.search_files_detailed(&query, all)? {
                     println!(
                         "{}\t{}\t{}\t{}",
@@ -450,15 +467,20 @@ fn main() -> Result<()> {
                         manifest.chunks.len()
                     );
                 }
-                StorageCommand::Locations { file_id } => {
-                    for location in vault.file_locations(&file_id)? {
-                        println!(
-                            "{}\t{}\t{}\t{}",
-                            location.chunk_id,
-                            location.backend_id,
-                            location.status,
-                            location.object_key
-                        );
+                StorageCommand::Locations { file_id, json } => {
+                    let locations = vault.file_locations(&file_id)?;
+                    if json {
+                        print_json(&locations)?;
+                    } else {
+                        for location in locations {
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                location.chunk_id,
+                                location.backend_id,
+                                location.status,
+                                location.object_key
+                            );
+                        }
                     }
                 }
                 StorageCommand::Verify { file_id } => {
@@ -580,12 +602,17 @@ fn main() -> Result<()> {
                     vault.detach_tag(&file_id, &name)?;
                     println!("detached tag {name} from {file_id}");
                 }
-                TagCommand::File { file_id } => {
-                    for tag in vault.tags_for_file(&file_id)? {
-                        println!(
-                            "{}\t{}\t{}\t{}",
-                            tag.tag_id, tag.tag_type, tag.source, tag.name
-                        );
+                TagCommand::File { file_id, json } => {
+                    let tags = vault.tags_for_file(&file_id)?;
+                    if json {
+                        print_json(&tags)?;
+                    } else {
+                        for tag in tags {
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                tag.tag_id, tag.tag_type, tag.source, tag.name
+                            );
+                        }
                     }
                 }
             }
@@ -606,6 +633,11 @@ fn main() -> Result<()> {
 
 fn serde_json_pretty(value: &impl serde::Serialize) -> Result<String> {
     Ok(serde_json::to_string_pretty(value)?)
+}
+
+fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    println!("{}", serde_json_pretty(value)?);
+    Ok(())
 }
 
 fn redact_backend_config(config_json: &str) -> String {

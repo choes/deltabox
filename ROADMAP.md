@@ -18,6 +18,7 @@
 - PDF 按页索引任务和可恢复进度
 - UTF-8 文本按 chunk 索引任务和可恢复进度
 - 索引任务 pause / resume 和 stale timeout
+- CLI JSON 输出：`search --details --json`、`info --json`、`tag file --json`、`storage locations --json`
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -41,7 +42,6 @@
 
 3. **Agent 本地使用入口**
    - deltabox Skill
-   - CLI JSON 输出：`search --details --json`、`info --json`、`tag --json`
    - 用 Skill + CLI 验证本地 Agent 找文件、读片段、打标签的工作流
 
 ### 中期计划
@@ -91,6 +91,7 @@
 - Page-level PDF indexing tasks and resumable progress
 - Chunk-level UTF-8 text indexing tasks and resumable progress
 - Index task pause / resume and stale timeout
+- CLI JSON output: `search --details --json`, `info --json`, `tag file --json`, `storage locations --json`
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations
@@ -114,7 +115,6 @@
 
 3. **Local Agent Entry Points**
    - deltabox Skill
-   - CLI JSON output: `search --details --json`, `info --json`, `tag --json`
    - Validate local Agent workflows for finding files, reading segments, and tagging files with Skill + CLI
 
 ### Mid-Term Plan
