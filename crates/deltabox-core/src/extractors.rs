@@ -3,6 +3,7 @@ use std::io::{Cursor, Read};
 use anyhow::Result;
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use zip::result::ZipError;
 use zip::ZipArchive;
 
 use crate::manifest::FileManifest;
@@ -272,9 +273,11 @@ fn extract_docx_document_text(bytes: &[u8]) -> Result<String> {
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
     let mut document = String::new();
-    archive
-        .by_name("word/document.xml")?
-        .read_to_string(&mut document)?;
+    match archive.by_name("word/document.xml") {
+        Ok(mut file) => file.read_to_string(&mut document)?,
+        Err(ZipError::FileNotFound) => return Ok(String::new()),
+        Err(error) => return Err(error.into()),
+    };
 
     let mut reader = Reader::from_str(&document);
     reader.config_mut().trim_text(true);

@@ -46,7 +46,16 @@ impl Vault {
         let extractor = extractor_for_manifest(&manifest)
             .ok_or_else(|| anyhow!("unsupported mime type: {}", manifest.mime))?;
         let bytes = self.read_file_bytes(&manifest)?;
-        let tasks = extractor.plan_tasks(&manifest, &bytes)?;
+        let tasks = match extractor.plan_tasks(&manifest, &bytes) {
+            Ok(tasks) => tasks,
+            Err(error) => {
+                return self.create_failed_index_job(
+                    &manifest,
+                    "planning_failed",
+                    &error.to_string(),
+                );
+            }
+        };
         if tasks.is_empty() {
             return self.create_skipped_index_job(&manifest, "no_text_tasks");
         }
@@ -215,8 +224,10 @@ impl Vault {
         if !is_text_extractable(manifest) {
             return Ok(());
         }
-        let job = self.enqueue_index_file(&manifest.file_id)?;
-        self.run_index_job(&job.job_id)?;
+        let Ok(job) = self.enqueue_index_file(&manifest.file_id) else {
+            return Ok(());
+        };
+        let _ = self.run_index_job(&job.job_id);
         Ok(())
     }
 
@@ -410,6 +421,17 @@ impl Vault {
     ) -> Result<IndexJobRecord> {
         let job = self.create_index_job(manifest, "document_text", 0, "skipped")?;
         self.finish_index_job(&job.job_id, "skipped", 0, 0, Some(reason))
+    }
+
+    fn create_failed_index_job(
+        &self,
+        manifest: &FileManifest,
+        reason: &str,
+        error: &str,
+    ) -> Result<IndexJobRecord> {
+        let message = format!("{reason}: {error}");
+        let job = self.create_index_job(manifest, "document_text", 0, "failed_permanent")?;
+        self.finish_index_job(&job.job_id, "failed_permanent", 0, 0, Some(&message))
     }
 
     fn finish_index_job(

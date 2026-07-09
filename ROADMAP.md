@@ -16,6 +16,7 @@
 - PDF text layer 索引，支持页码定位
 - DOCX 正文文本索引
 - XLSX 单元格文本索引
+- Office 文档索引容错
 - 搜索结果片段增强
 - PDF 按页索引任务和可恢复进度
 - UTF-8 文本按 chunk 索引任务和可恢复进度
@@ -90,6 +91,7 @@
 - PDF text layer indexing with page locators
 - DOCX body text indexing
 - XLSX cell text indexing
+- Office indexing fault tolerance
 - Detailed search result segments
 - Page-level PDF indexing tasks and resumable progress
 - Chunk-level UTF-8 text indexing tasks and resumable progress

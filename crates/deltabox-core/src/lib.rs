@@ -660,6 +660,95 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_docx_import_succeeds_and_records_index_error() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("corrupt.docx");
+        fs::write(&input, b"not a zip archive")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/corrupt.docx".to_owned()),
+        })?;
+        assert_eq!(vault.list_files(false)?.len(), 1);
+        assert_eq!(vault.text_segments_for_file(&manifest.file_id)?.len(), 0);
+
+        let jobs = vault.list_index_jobs()?;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].file_id, manifest.file_id);
+        assert_eq!(jobs[0].status, "failed_permanent");
+        assert!(jobs[0]
+            .last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("planning_failed"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn docx_without_document_xml_imports_as_no_text() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("empty.docx");
+        fs::write(&input, minimal_zip_file("docProps/core.xml", "<core />")?)?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/empty.docx".to_owned()),
+        })?;
+        assert_eq!(vault.list_files(false)?.len(), 1);
+        assert_eq!(vault.text_segments_for_file(&manifest.file_id)?.len(), 0);
+
+        let jobs = vault.list_index_jobs()?;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].file_id, manifest.file_id);
+        assert_eq!(jobs[0].status, "skipped");
+        assert_eq!(jobs[0].last_error.as_deref(), Some("no_text_tasks"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_xlsx_import_succeeds_and_records_index_error() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("broken.xlsx");
+        fs::write(&input, b"not a zip archive")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/broken.xlsx".to_owned()),
+        })?;
+        assert_eq!(vault.list_files(false)?.len(), 1);
+        assert_eq!(vault.text_segments_for_file(&manifest.file_id)?.len(), 0);
+
+        let jobs = vault.list_index_jobs()?;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].file_id, manifest.file_id);
+        assert_eq!(jobs[0].status, "failed_permanent");
+        assert!(jobs[0]
+            .last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("planning_failed"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn pdf_text_layer_is_indexed_with_page_locator() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");
@@ -899,6 +988,16 @@ mod tests {
         writer.write_all(shared.as_bytes())?;
         writer.start_file("xl/worksheets/sheet1.xml", options)?;
         writer.write_all(sheet.as_bytes())?;
+        Ok(writer.finish()?.into_inner())
+    }
+
+    fn minimal_zip_file(name: &str, content: &str) -> Result<Vec<u8>> {
+        let cursor = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        writer.start_file(name, options)?;
+        writer.write_all(content.as_bytes())?;
         Ok(writer.finish()?.into_inner())
     }
 
