@@ -39,13 +39,10 @@
    - key rotation
    - backend credential migration
 
-3. **MCP server 原型**
-   - `search_files`
-   - `read_file_metadata`
-   - `read_text_segments`
-   - `tag_files`
-   - `storage_locations`
-   - capability-based permission checks
+3. **Agent 本地使用入口**
+   - deltabox Skill
+   - CLI JSON 输出：`search --details --json`、`info --json`、`tag --json`
+   - 用 Skill + CLI 验证本地 Agent 找文件、读片段、打标签的工作流
 
 ### 中期计划
 
@@ -63,6 +60,11 @@
 - S3-compatible backend 稳定性增强
 - WebDAV backend
 - 邮箱 backend 原型
+- MCP server 原型
+  - 在 Skill 工作流和 CLI JSON 输出稳定后开始
+  - 当需要多个智能体或应用共享结构化工具时开始
+  - 当需要工具级权限、只读模式和 capability-based permission checks 时开始
+  - 初始工具：`search_files`、`read_file_metadata`、`read_text_segments`、`tag_files`、`storage_locations`
 
 ### 长期计划
 
@@ -70,7 +72,6 @@
 - 设备身份和设备撤销
 - 分享与协作
 - Local-first AI 助手集成
-- 面向 Codex / Claude Code 的 Agent Skill
 - 支持可恢复后台索引的移动端应用
 - 本地向量索引和语义搜索
 
@@ -111,13 +112,10 @@
    - Key rotation
    - Backend credential migration
 
-3. **MCP Server Prototype**
-   - `search_files`
-   - `read_file_metadata`
-   - `read_text_segments`
-   - `tag_files`
-   - `storage_locations`
-   - Capability-based permission checks
+3. **Local Agent Entry Points**
+   - deltabox Skill
+   - CLI JSON output: `search --details --json`, `info --json`, `tag --json`
+   - Validate local Agent workflows for finding files, reading segments, and tagging files with Skill + CLI
 
 ### Mid-Term Plan
 
@@ -135,6 +133,11 @@
 - S3-compatible backend hardening
 - WebDAV backend
 - Email backend prototype
+- MCP server prototype
+  - Start after Skill workflows and CLI JSON output are stable
+  - Start when multiple agents or apps need shared structured tools
+  - Start when tool-level permissions, read-only mode, and capability-based permission checks are needed
+  - Initial tools: `search_files`, `read_file_metadata`, `read_text_segments`, `tag_files`, `storage_locations`
 
 ### Long-Term Plan
 
@@ -142,6 +145,5 @@
 - Device identity and revocation
 - Sharing and collaboration
 - Local-first AI assistant integration
-- Agent Skills for Codex / Claude Code
 - Mobile app with resumable background indexing
 - Local vector index and semantic search
