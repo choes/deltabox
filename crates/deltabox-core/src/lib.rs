@@ -954,6 +954,97 @@ mod tests {
     }
 
     #[test]
+    fn png_image_metadata_is_indexed() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("photo.png");
+        fs::write(&input, minimal_png(640, 480))?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/photos/photo.png".to_owned()),
+        })?;
+        assert_eq!(manifest.mime, "image/png");
+        assert_eq!(vault.search_files("640x480", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].source, "image_metadata");
+        assert_eq!(segments[0].task_key, "image:metadata");
+        assert!(segments[0].text.contains("format: png"));
+        assert!(segments[0].text.contains("width: 640"));
+        assert!(segments[0].text.contains("height: 480"));
+        assert!(segments[0].text.contains("mime: image/png"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn jpeg_image_metadata_scans_exif_datetime() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("photo.jpg");
+        fs::write(&input, minimal_jpeg(1024, 768, Some("2025:03:04 10:11:12")))?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/photos/photo.jpg".to_owned()),
+        })?;
+        assert_eq!(manifest.mime, "image/jpeg");
+        assert_eq!(vault.search_files("2025:03:04", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].source, "image_metadata");
+        assert!(segments[0].text.contains("format: jpeg"));
+        assert!(segments[0].text.contains("dimensions: 1024x768"));
+        assert!(segments[0]
+            .text
+            .contains("exif_datetime: 2025:03:04 10:11:12"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_image_import_succeeds_and_records_index_error() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("broken.jpg");
+        fs::write(&input, b"not a jpeg")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/photos/broken.jpg".to_owned()),
+        })?;
+        assert_eq!(vault.list_files(false)?.len(), 1);
+        assert_eq!(vault.text_segments_for_file(&manifest.file_id)?.len(), 0);
+
+        let jobs = vault.list_index_jobs()?;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].file_id, manifest.file_id);
+        assert_eq!(jobs[0].status, "failed_permanent");
+        assert!(jobs[0]
+            .last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("planning_failed"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn pdf_text_layer_is_indexed_with_page_locator() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");
@@ -1274,6 +1365,35 @@ mod tests {
         }
         xml.push_str(suffix);
         xml
+    }
+
+    fn minimal_png(width: u32, height: u32) -> Vec<u8> {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&13_u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&width.to_be_bytes());
+        png.extend_from_slice(&height.to_be_bytes());
+        png.extend_from_slice(&[8, 2, 0, 0, 0]);
+        png.extend_from_slice(&0_u32.to_be_bytes());
+        png
+    }
+
+    fn minimal_jpeg(width: u16, height: u16, datetime: Option<&str>) -> Vec<u8> {
+        let mut jpeg = vec![0xff, 0xd8];
+        if let Some(datetime) = datetime {
+            let payload = format!("Exif\0\0DateTimeOriginal\0{datetime}\0");
+            jpeg.extend_from_slice(&[0xff, 0xe1]);
+            jpeg.extend_from_slice(&((payload.len() + 2) as u16).to_be_bytes());
+            jpeg.extend_from_slice(payload.as_bytes());
+        }
+        jpeg.extend_from_slice(&[0xff, 0xc0]);
+        jpeg.extend_from_slice(&17_u16.to_be_bytes());
+        jpeg.push(8);
+        jpeg.extend_from_slice(&height.to_be_bytes());
+        jpeg.extend_from_slice(&width.to_be_bytes());
+        jpeg.extend_from_slice(&[3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0]);
+        jpeg.extend_from_slice(&[0xff, 0xd9]);
+        jpeg
     }
 
     fn minimal_zip_file(name: &str, content: &str) -> Result<Vec<u8>> {

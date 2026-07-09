@@ -48,6 +48,7 @@ pub(crate) fn extractor_for_manifest(manifest: &FileManifest) -> Option<Box<dyn 
         Box::new(DocxTextExtractor),
         Box::new(XlsxTextExtractor),
         Box::new(PptxTextExtractor),
+        Box::new(ImageMetadataExtractor),
     ];
     extractors
         .into_iter()
@@ -335,6 +336,58 @@ impl TextExtractor for PptxTextExtractor {
             .ok_or_else(|| anyhow::anyhow!("PPTX notes task out of range: {}", task.task_key))?;
         let text = extract_pptx_part_text(bytes, &note_name)?;
         pptx_segments("pptx_speaker_notes", &task.task_key, note, &text)
+    }
+}
+
+struct ImageMetadataExtractor;
+
+impl TextExtractor for ImageMetadataExtractor {
+    fn supports(&self, manifest: &FileManifest) -> bool {
+        matches!(
+            manifest.mime.as_str(),
+            "image/jpeg" | "image/png" | "image/gif"
+        )
+    }
+
+    fn plan_tasks(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
+        let metadata = extract_image_metadata(bytes)?;
+        if metadata.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Ok(vec![ExtractionTask {
+                task_key: "image:metadata".to_owned(),
+            }])
+        }
+    }
+
+    fn extract_task(
+        &self,
+        manifest: &FileManifest,
+        bytes: &[u8],
+        task: &ExtractionTask,
+    ) -> Result<Vec<ExtractedTextSegment>> {
+        if task.task_key != "image:metadata" {
+            return Err(anyhow::anyhow!(
+                "unsupported image metadata extraction task: {}",
+                task.task_key
+            ));
+        }
+        let mut metadata = extract_image_metadata(bytes)?;
+        metadata.push(("mime".to_owned(), manifest.mime.clone()));
+        metadata.push(("size_bytes".to_owned(), manifest.size.to_string()));
+        let text = render_metadata_text(&metadata);
+        Ok(vec![segment_from_text(
+            "image_metadata".to_owned(),
+            task.task_key.clone(),
+            0,
+            TextSegmentDraft {
+                char_end: text.len() as u64,
+                text,
+                line_start: 1,
+                line_end: metadata.len() as u64,
+                char_start: 0,
+            },
+        )])
     }
 }
 
@@ -631,6 +684,121 @@ fn extract_pptx_part_text(bytes: &[u8], part_name: &str) -> Result<String> {
     let mut archive = zip_archive(bytes)?;
     let part = read_zip_part(&mut archive, part_name)?;
     extract_xml_text_nodes(&part, b"t", Some(b"t"))
+}
+
+fn extract_image_metadata(bytes: &[u8]) -> Result<Vec<(String, String)>> {
+    let (format, width, height) = image_dimensions(bytes)?;
+    let mut metadata = vec![
+        ("format".to_owned(), format.to_owned()),
+        ("width".to_owned(), width.to_string()),
+        ("height".to_owned(), height.to_string()),
+        ("dimensions".to_owned(), format!("{width}x{height}")),
+    ];
+    if let Some(datetime) = scan_exif_datetime(bytes) {
+        metadata.push(("exif_datetime".to_owned(), datetime));
+    }
+    Ok(metadata)
+}
+
+fn render_metadata_text(metadata: &[(String, String)]) -> String {
+    metadata
+        .iter()
+        .map(|(key, value)| format!("{key}: {value}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+fn image_dimensions(bytes: &[u8]) -> Result<(&'static str, u32, u32)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return png_dimensions(bytes);
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return gif_dimensions(bytes);
+    }
+    if bytes.starts_with(&[0xff, 0xd8]) {
+        return jpeg_dimensions(bytes);
+    }
+    Err(anyhow::anyhow!("unsupported image metadata format"))
+}
+
+fn png_dimensions(bytes: &[u8]) -> Result<(&'static str, u32, u32)> {
+    if bytes.len() < 24 || &bytes[12..16] != b"IHDR" {
+        return Err(anyhow::anyhow!("invalid PNG header"));
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into()?);
+    let height = u32::from_be_bytes(bytes[20..24].try_into()?);
+    Ok(("png", width, height))
+}
+
+fn gif_dimensions(bytes: &[u8]) -> Result<(&'static str, u32, u32)> {
+    if bytes.len() < 10 {
+        return Err(anyhow::anyhow!("invalid GIF header"));
+    }
+    let width = u16::from_le_bytes(bytes[6..8].try_into()?) as u32;
+    let height = u16::from_le_bytes(bytes[8..10].try_into()?) as u32;
+    Ok(("gif", width, height))
+}
+
+fn jpeg_dimensions(bytes: &[u8]) -> Result<(&'static str, u32, u32)> {
+    let mut offset = 2_usize;
+    while offset + 4 <= bytes.len() {
+        if bytes[offset] != 0xff {
+            return Err(anyhow::anyhow!("invalid JPEG marker"));
+        }
+        let marker = bytes[offset + 1];
+        offset += 2;
+        if marker == 0xd8 || marker == 0xd9 {
+            continue;
+        }
+        if marker == 0xda {
+            break;
+        }
+        if offset + 2 > bytes.len() {
+            break;
+        }
+        let length = u16::from_be_bytes(bytes[offset..offset + 2].try_into()?) as usize;
+        if length < 2 || offset + length > bytes.len() {
+            return Err(anyhow::anyhow!("invalid JPEG segment length"));
+        }
+        if is_jpeg_sof_marker(marker) {
+            if length < 7 {
+                return Err(anyhow::anyhow!("invalid JPEG SOF segment"));
+            }
+            let height = u16::from_be_bytes(bytes[offset + 3..offset + 5].try_into()?) as u32;
+            let width = u16::from_be_bytes(bytes[offset + 5..offset + 7].try_into()?) as u32;
+            return Ok(("jpeg", width, height));
+        }
+        offset += length;
+    }
+    Err(anyhow::anyhow!("JPEG dimensions not found"))
+}
+
+fn is_jpeg_sof_marker(marker: u8) -> bool {
+    matches!(
+        marker,
+        0xc0 | 0xc1 | 0xc2 | 0xc3 | 0xc5 | 0xc6 | 0xc7 | 0xc9 | 0xca | 0xcb | 0xcd | 0xce | 0xcf
+    )
+}
+
+fn scan_exif_datetime(bytes: &[u8]) -> Option<String> {
+    bytes.windows(19).find_map(|window| {
+        let value = std::str::from_utf8(window).ok()?;
+        if value.as_bytes()[4] == b':'
+            && value.as_bytes()[7] == b':'
+            && value.as_bytes()[10] == b' '
+            && value.as_bytes()[13] == b':'
+            && value.as_bytes()[16] == b':'
+            && value
+                .bytes()
+                .enumerate()
+                .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit())
+        {
+            Some(value.to_owned())
+        } else {
+            None
+        }
+    })
 }
 
 fn zip_archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {
