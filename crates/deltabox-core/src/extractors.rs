@@ -291,13 +291,19 @@ impl TextExtractor for PptxTextExtractor {
 
     fn plan_tasks(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
         let slides = pptx_slide_names(bytes)?;
-        Ok(slides
+        let mut tasks = slides
             .into_iter()
             .enumerate()
             .map(|(index, _)| ExtractionTask {
                 task_key: format!("pptx:slide:{}", index + 1),
             })
-            .collect())
+            .collect::<Vec<_>>();
+        for note in pptx_notes_names(bytes)?.into_iter().enumerate() {
+            tasks.push(ExtractionTask {
+                task_key: format!("pptx:notes:{}", note.0 + 1),
+            });
+        }
+        Ok(tasks)
     }
 
     fn extract_task(
@@ -306,38 +312,59 @@ impl TextExtractor for PptxTextExtractor {
         bytes: &[u8],
         task: &ExtractionTask,
     ) -> Result<Vec<ExtractedTextSegment>> {
-        let slide = task
-            .task_key
-            .strip_prefix("pptx:slide:")
-            .ok_or_else(|| anyhow::anyhow!("unsupported PPTX extraction task: {}", task.task_key))?
-            .parse::<u64>()?;
-        let slide_name = pptx_slide_names(bytes)?
-            .get(slide.saturating_sub(1) as usize)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("PPTX slide task out of range: {}", task.task_key))?;
-        let text = extract_pptx_slide_text(bytes, &slide_name)?;
-        let mut segments = Vec::new();
-
-        for segment in split_text_segments(&text, 100) {
-            let segment_index = segments.len() as u64;
-            segments.push(ExtractedTextSegment {
-                source: "pptx_text".to_owned(),
-                task_key: task.task_key.clone(),
-                segment_index,
-                text: segment.text,
-                page: Some(slide),
-                line_start: Some(segment.line_start),
-                line_end: Some(segment.line_end),
-                char_start: Some(segment.char_start),
-                char_end: Some(segment.char_end),
-                start_ms: None,
-                end_ms: None,
-                confidence: 1.0,
-            });
+        if let Some(slide) = task.task_key.strip_prefix("pptx:slide:") {
+            let slide = slide.parse::<u64>()?;
+            let slide_name = pptx_slide_names(bytes)?
+                .get(slide.saturating_sub(1) as usize)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("PPTX slide task out of range: {}", task.task_key)
+                })?;
+            let text = extract_pptx_part_text(bytes, &slide_name)?;
+            return pptx_segments("pptx_text", &task.task_key, slide, &text);
         }
 
-        Ok(segments)
+        let note = task
+            .task_key
+            .strip_prefix("pptx:notes:")
+            .ok_or_else(|| anyhow::anyhow!("unsupported PPTX extraction task: {}", task.task_key))?
+            .parse::<u64>()?;
+        let note_name = pptx_notes_names(bytes)?
+            .get(note.saturating_sub(1) as usize)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("PPTX notes task out of range: {}", task.task_key))?;
+        let text = extract_pptx_part_text(bytes, &note_name)?;
+        pptx_segments("pptx_speaker_notes", &task.task_key, note, &text)
     }
+}
+
+fn pptx_segments(
+    source: &str,
+    task_key: &str,
+    page: u64,
+    text: &str,
+) -> Result<Vec<ExtractedTextSegment>> {
+    let mut segments = Vec::new();
+
+    for segment in split_text_segments(text, 100) {
+        let segment_index = segments.len() as u64;
+        segments.push(ExtractedTextSegment {
+            source: source.to_owned(),
+            task_key: task_key.to_owned(),
+            segment_index,
+            text: segment.text,
+            page: Some(page),
+            line_start: Some(segment.line_start),
+            line_end: Some(segment.line_end),
+            char_start: Some(segment.char_start),
+            char_end: Some(segment.char_end),
+            start_ms: None,
+            end_ms: None,
+            confidence: 1.0,
+        });
+    }
+
+    Ok(segments)
 }
 
 fn segment_from_text(
@@ -567,29 +594,43 @@ fn parse_xlsx_worksheet_text(xml: &str, shared_strings: &[String]) -> Result<Str
 
 fn pptx_slide_names(bytes: &[u8]) -> Result<Vec<String>> {
     let mut archive = zip_archive(bytes)?;
-    let mut slide_names = list_zip_parts(&mut archive, "ppt/slides/slide", ".xml")?
-        .into_iter()
-        .filter(|name| {
-            name.starts_with("ppt/slides/slide")
-                && name.ends_with(".xml")
-                && slide_number_from_name(name).is_some()
-        })
-        .collect::<Vec<_>>();
-    slide_names.sort_by_key(|name| slide_number_from_name(name).unwrap_or(u64::MAX));
-    Ok(slide_names)
+    numbered_pptx_parts(&mut archive, "ppt/slides/slide", ".xml")
 }
 
-fn slide_number_from_name(name: &str) -> Option<u64> {
-    name.strip_prefix("ppt/slides/slide")?
-        .strip_suffix(".xml")?
+fn pptx_notes_names(bytes: &[u8]) -> Result<Vec<String>> {
+    let mut archive = zip_archive(bytes)?;
+    numbered_pptx_parts(&mut archive, "ppt/notesSlides/notesSlide", ".xml")
+}
+
+fn numbered_pptx_parts<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    prefix: &str,
+    suffix: &str,
+) -> Result<Vec<String>> {
+    let mut names = list_zip_parts(archive, prefix, suffix)?
+        .into_iter()
+        .filter(|name| {
+            name.starts_with(prefix) && name.ends_with(suffix) && pptx_part_number(name).is_some()
+        })
+        .collect::<Vec<_>>();
+    names.sort_by_key(|name| pptx_part_number(name).unwrap_or(u64::MAX));
+    Ok(names)
+}
+
+fn pptx_part_number(name: &str) -> Option<u64> {
+    name.rsplit('/')
+        .next()?
+        .chars()
+        .filter(|value| value.is_ascii_digit())
+        .collect::<String>()
         .parse()
         .ok()
 }
 
-fn extract_pptx_slide_text(bytes: &[u8], slide_name: &str) -> Result<String> {
+fn extract_pptx_part_text(bytes: &[u8], part_name: &str) -> Result<String> {
     let mut archive = zip_archive(bytes)?;
-    let slide = read_zip_part(&mut archive, slide_name)?;
-    extract_xml_text_nodes(&slide, b"t", Some(b"t"))
+    let part = read_zip_part(&mut archive, part_name)?;
+    extract_xml_text_nodes(&part, b"t", Some(b"t"))
 }
 
 fn zip_archive(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {

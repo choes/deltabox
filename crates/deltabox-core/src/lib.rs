@@ -884,6 +884,45 @@ mod tests {
     }
 
     #[test]
+    fn pptx_speaker_notes_are_indexed_separately() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("deck-notes.pptx");
+        fs::write(
+            &input,
+            minimal_pptx_with_slides_and_notes(
+                &[&["visible slide title"]],
+                &[&["private roadmap planning notes"]],
+            )?,
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/deck-notes.pptx".to_owned()),
+        })?;
+        assert_eq!(vault.search_files("roadmap planning", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 2);
+        assert!(segments.iter().any(|segment| segment.source == "pptx_text"
+            && segment.task_key == "pptx:slide:1"
+            && segment.page == Some(1)));
+        let notes = segments
+            .iter()
+            .find(|segment| segment.source == "pptx_speaker_notes")
+            .expect("speaker notes segment");
+        assert_eq!(notes.task_key, "pptx:notes:1");
+        assert_eq!(notes.page, Some(1));
+        assert!(notes.text.contains("private roadmap planning notes"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn corrupt_pptx_import_succeeds_and_records_index_error() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");
@@ -1181,30 +1220,60 @@ mod tests {
     }
 
     fn minimal_pptx_with_slides(slides: &[&[&str]]) -> Result<Vec<u8>> {
+        minimal_pptx_with_slides_and_notes(slides, &[])
+    }
+
+    fn minimal_pptx_with_slides_and_notes(
+        slides: &[&[&str]],
+        notes: &[&[&str]],
+    ) -> Result<Vec<u8>> {
         let cursor = Cursor::new(Vec::new());
         let mut writer = zip::ZipWriter::new(cursor);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
 
         for (index, slide_texts) in slides.iter().enumerate() {
-            let mut slide = String::from(
+            let slide = minimal_pptx_xml(
                 r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
   <p:cSld><p:spTree>
 "#,
+                "  </p:spTree></p:cSld>\n</p:sld>\n",
+                slide_texts,
             );
-            for text in *slide_texts {
-                slide.push_str("    <p:sp><p:txBody><a:p><a:r><a:t>");
-                slide.push_str(&escape_xml_text(text));
-                slide.push_str("</a:t></a:r></a:p></p:txBody></p:sp>\n");
-            }
-            slide.push_str("  </p:spTree></p:cSld>\n</p:sld>\n");
             writer.start_file(format!("ppt/slides/slide{}.xml", index + 1), options)?;
             writer.write_all(slide.as_bytes())?;
         }
+        for (index, note_texts) in notes.iter().enumerate() {
+            let note = minimal_pptx_xml(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+         xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree>
+"#,
+                "  </p:spTree></p:cSld>\n</p:notes>\n",
+                note_texts,
+            );
+            writer.start_file(
+                format!("ppt/notesSlides/notesSlide{}.xml", index + 1),
+                options,
+            )?;
+            writer.write_all(note.as_bytes())?;
+        }
 
         Ok(writer.finish()?.into_inner())
+    }
+
+    fn minimal_pptx_xml(prefix: &str, suffix: &str, text_runs: &[&str]) -> String {
+        let mut xml = prefix.to_owned();
+        for text in text_runs {
+            xml.push_str("    <p:sp><p:txBody><a:p><a:r><a:t>");
+            xml.push_str(&escape_xml_text(text));
+            xml.push_str("</a:t></a:r></a:p></p:txBody></p:sp>\n");
+        }
+        xml.push_str(suffix);
+        xml
     }
 
     fn minimal_zip_file(name: &str, content: &str) -> Result<Vec<u8>> {
