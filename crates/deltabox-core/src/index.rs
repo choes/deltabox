@@ -10,7 +10,7 @@ use crate::extractors::{
 };
 use crate::manifest::FileManifest;
 use crate::util::now_rfc3339;
-use crate::{IndexJobRecord, Vault};
+use crate::{IndexJobRecord, TextSegmentRecord, Vault};
 
 const DEFAULT_STALE_TIMEOUT_SECONDS: i64 = 600;
 
@@ -90,6 +90,22 @@ impl Vault {
              ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], row_to_index_job_record)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    pub fn text_segments_for_file(&self, file_id: &str) -> Result<Vec<TextSegmentRecord>> {
+        self.ensure_file_exists(file_id)?;
+        let conn = self.open_db()?;
+        let mut stmt = conn.prepare(
+            "SELECT segment_id, file_id, source, task_key, segment_index, text,
+                    page, line_start, line_end, char_start, char_end, start_ms, end_ms,
+                    confidence, created_at, updated_at
+             FROM text_segments
+             WHERE file_id = ?1
+             ORDER BY segment_index, page, line_start",
+        )?;
+        let rows = stmt.query_map(params![file_id], row_to_text_segment_record)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)
     }
@@ -617,6 +633,27 @@ fn row_to_index_task_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<IndexTa
         file_id: row.get(1)?,
         task_type: row.get(2)?,
         task_key: row.get(3)?,
+    })
+}
+
+fn row_to_text_segment_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<TextSegmentRecord> {
+    Ok(TextSegmentRecord {
+        segment_id: row.get(0)?,
+        file_id: row.get(1)?,
+        source: row.get(2)?,
+        task_key: row.get(3)?,
+        segment_index: row.get(4)?,
+        text: row.get(5)?,
+        page: row.get(6)?,
+        line_start: row.get(7)?,
+        line_end: row.get(8)?,
+        char_start: row.get(9)?,
+        char_end: row.get(10)?,
+        start_ms: row.get(11)?,
+        end_ms: row.get(12)?,
+        confidence: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 

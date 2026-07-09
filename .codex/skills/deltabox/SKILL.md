@@ -33,6 +33,12 @@ Read tags for a file:
 deltabox --vault <vault> tag file <file_id> --json
 ```
 
+Read indexed text segments for a file:
+
+```bash
+deltabox --vault <vault> index segments <file_id> --json
+```
+
 Read storage locations:
 
 ```bash
@@ -52,7 +58,8 @@ deltabox --vault <vault> tag attach <file_id> "<tag>"
 3. Cite `logical_path`, `file_id`, and relevant match details.
 4. For PDF matches, include `page` when present.
 5. For text matches, include `line_start` / `line_end` when present.
-6. If results are broad, refine with more specific terms from the user's request.
+6. Use `index segments <file_id> --json` when the user asks for more context from a likely file.
+7. If results are broad, refine with more specific terms from the user's request.
 
 ## Answering Rules
 
@@ -66,5 +73,6 @@ deltabox --vault <vault> tag attach <file_id> "<tag>"
 
 - Search result: `file.file_id`, `file.logical_path`, `file.name`, `file.size`, `matches`.
 - Match: `match_kind`, `source`, `text`, `page`, `line_start`, `line_end`.
+- Text segment: `source`, `task_key`, `text`, `page`, `line_start`, `line_end`.
 - Storage location: `chunk_id`, `backend_id`, `object_key`, `status`.
 - Tag: `tag_id`, `name`, `tag_type`, `source`.

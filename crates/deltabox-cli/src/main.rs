@@ -121,6 +121,11 @@ enum IndexCommand {
     },
     Rebuild,
     Jobs,
+    Segments {
+        file_id: String,
+        #[arg(long)]
+        json: bool,
+    },
     Run {
         #[arg(long, default_value_t = 100)]
         limit: u64,
@@ -450,6 +455,31 @@ fn main() -> Result<()> {
                         );
                     }
                 }
+                IndexCommand::Segments { file_id, json } => {
+                    let segments = vault.text_segments_for_file(&file_id)?;
+                    if json {
+                        print_json(&segments)?;
+                    } else {
+                        for segment in segments {
+                            let locator = match (segment.page, segment.line_start, segment.line_end)
+                            {
+                                (Some(page), _, _) => format!("page={page}"),
+                                (None, Some(line_start), Some(line_end)) => {
+                                    format!("lines={line_start}-{line_end}")
+                                }
+                                _ => "-".to_owned(),
+                            };
+                            println!(
+                                "{}\t{}\t{}\t{}\t{}",
+                                segment.source,
+                                segment.task_key,
+                                segment.segment_index,
+                                locator,
+                                collapse_whitespace(&segment.text)
+                            );
+                        }
+                    }
+                }
             }
         }
         Command::Storage { command } => {
@@ -676,4 +706,8 @@ fn format_search_match(search_match: &deltabox_core::SearchMatch) -> String {
         parts.push(text.clone());
     }
     parts.join("\t")
+}
+
+fn collapse_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }

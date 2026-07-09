@@ -126,6 +126,26 @@ pub struct SearchMatch {
     pub score: Option<f64>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TextSegmentRecord {
+    pub segment_id: String,
+    pub file_id: String,
+    pub source: String,
+    pub task_key: String,
+    pub segment_index: u64,
+    pub text: String,
+    pub page: Option<u64>,
+    pub line_start: Option<u64>,
+    pub line_end: Option<u64>,
+    pub char_start: Option<u64>,
+    pub char_end: Option<u64>,
+    pub start_ms: Option<u64>,
+    pub end_ms: Option<u64>,
+    pub confidence: f64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -286,6 +306,11 @@ mod tests {
         let jobs = vault.list_index_jobs()?;
         assert!(jobs.iter().any(|job| job.status == "completed"));
         assert_eq!(vault.search_files("recoverable", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].source, "plain_text");
+        assert!(segments[0].text.contains("recoverable worker"));
 
         fs::remove_dir_all(root)?;
         Ok(())

@@ -19,6 +19,7 @@
 - UTF-8 文本按 chunk 索引任务和可恢复进度
 - 索引任务 pause / resume 和 stale timeout
 - CLI JSON 输出：`search --details --json`、`info --json`、`tag file --json`、`storage locations --json`
+- `index segments <file_id> --json` 文本片段读取
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -92,6 +93,7 @@
 - Chunk-level UTF-8 text indexing tasks and resumable progress
 - Index task pause / resume and stale timeout
 - CLI JSON output: `search --details --json`, `info --json`, `tag file --json`, `storage locations --json`
+- `index segments <file_id> --json` text segment reader
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations
