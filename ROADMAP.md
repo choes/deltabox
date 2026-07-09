@@ -20,6 +20,7 @@
 - 索引任务 pause / resume 和 stale timeout
 - CLI JSON 输出：`search --details --json`、`info --json`、`tag file --json`、`storage locations --json`
 - `index segments <file_id> --json` 文本片段读取
+- deltabox Skill 和本地 Agent 工作流验证
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -40,10 +41,6 @@
    - recovery key
    - key rotation
    - backend credential migration
-
-3. **Agent 本地使用入口**
-   - deltabox Skill
-   - 用 Skill + CLI 验证本地 Agent 找文件、读片段、打标签的工作流
 
 ### 中期计划
 
@@ -94,6 +91,7 @@
 - Index task pause / resume and stale timeout
 - CLI JSON output: `search --details --json`, `info --json`, `tag file --json`, `storage locations --json`
 - `index segments <file_id> --json` text segment reader
+- deltabox Skill and local Agent workflow validation
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations
@@ -114,10 +112,6 @@
    - Recovery key
    - Key rotation
    - Backend credential migration
-
-3. **Local Agent Entry Points**
-   - deltabox Skill
-   - Validate local Agent workflows for finding files, reading segments, and tagging files with Skill + CLI
 
 ### Mid-Term Plan
 

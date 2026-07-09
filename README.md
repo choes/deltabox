@@ -75,6 +75,13 @@ cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag file <file_id> --jso
 cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id> --json
 ```
 
+安装本地 Codex Skill：
+
+```bash
+mkdir -p ~/.codex/skills/deltabox
+cp .codex/skills/deltabox/SKILL.md ~/.codex/skills/deltabox/SKILL.md
+```
+
 控制后台索引任务：
 
 ```bash
@@ -197,6 +204,13 @@ cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo info <file_id> --json
 cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index segments <file_id> --json
 cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag file <file_id> --json
 cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id> --json
+```
+
+Install the local Codex Skill:
+
+```bash
+mkdir -p ~/.codex/skills/deltabox
+cp .codex/skills/deltabox/SKILL.md ~/.codex/skills/deltabox/SKILL.md
 ```
 
 Control background indexing jobs:
