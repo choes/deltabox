@@ -15,6 +15,7 @@
 - 通用文本提取器抽象
 - PDF text layer 索引，支持页码定位
 - DOCX 正文文本索引
+- DOCX 页眉页脚文本索引
 - XLSX 单元格文本索引
 - PPTX 幻灯片文本索引
 - Office 文档索引容错
@@ -50,7 +51,7 @@
 
 - 图片和扫描版 PDF 的 OCR
 - EXIF / GPS 元数据提取
-- Office 复杂内容索引：页眉页脚、批注、修订历史、PPTX speaker notes、XLSX 图表/公式/批注
+- Office 复杂内容索引：DOCX 批注/修订历史、PPTX speaker notes、XLSX 图表/公式/批注
 - 视频关键帧和语音转文字索引
 - 后台 worker 守护进程
 - 本地桌面应用原型
@@ -91,6 +92,7 @@
 - Generic text extractor abstraction
 - PDF text layer indexing with page locators
 - DOCX body text indexing
+- DOCX header/footer text indexing
 - XLSX cell text indexing
 - PPTX slide text indexing
 - Office indexing fault tolerance
@@ -126,7 +128,7 @@
 
 - OCR for images and scanned PDFs
 - EXIF / GPS metadata extraction
-- Complex Office content indexing: headers, footers, comments, revisions, PPTX speaker notes, XLSX charts/formulas/comments
+- Complex Office content indexing: DOCX comments/revisions, PPTX speaker notes, XLSX charts/formulas/comments
 - Video keyframe and ASR text indexing
 - Background worker daemon
 - Local desktop app prototype

@@ -622,6 +622,52 @@ mod tests {
     }
 
     #[test]
+    fn docx_header_and_footer_text_are_indexed_separately() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("letter.docx");
+        fs::write(
+            &input,
+            minimal_docx_with_parts(
+                &["regular body text"],
+                &["confidential library header"],
+                &["archive footer marker"],
+            )?,
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/letter.docx".to_owned()),
+        })?;
+        assert_eq!(vault.search_files("library header", false)?.len(), 1);
+        assert_eq!(vault.search_files("footer marker", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 3);
+        assert!(segments.iter().any(|segment| {
+            segment.source == "docx_text" && segment.text.contains("regular body")
+        }));
+        let header = segments
+            .iter()
+            .find(|segment| segment.task_key == "docx:header_footer:1")
+            .expect("header segment");
+        assert_eq!(header.source, "docx_header_footer");
+        assert!(header.text.contains("confidential library header"));
+        let footer = segments
+            .iter()
+            .find(|segment| segment.task_key == "docx:header_footer:2")
+            .expect("footer segment");
+        assert_eq!(footer.source, "docx_header_footer");
+        assert!(footer.text.contains("archive footer marker"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn xlsx_text_is_indexed_from_shared_strings_and_worksheets() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");
@@ -1033,26 +1079,49 @@ mod tests {
     }
 
     fn minimal_docx_with_paragraphs(paragraphs: &[&str]) -> Result<Vec<u8>> {
-        let mut xml = String::from(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-"#,
-        );
-        for paragraph in paragraphs {
-            xml.push_str("    <w:p><w:r><w:t>");
-            xml.push_str(&escape_xml_text(paragraph));
-            xml.push_str("</w:t></w:r></w:p>\n");
-        }
-        xml.push_str("  </w:body>\n</w:document>\n");
+        minimal_docx_with_parts(paragraphs, &[], &[])
+    }
+
+    fn minimal_docx_with_parts(
+        paragraphs: &[&str],
+        headers: &[&str],
+        footers: &[&str],
+    ) -> Result<Vec<u8>> {
+        let document = minimal_docx_xml("document", "body", paragraphs);
 
         let cursor = Cursor::new(Vec::new());
         let mut writer = zip::ZipWriter::new(cursor);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Stored);
         writer.start_file("word/document.xml", options)?;
-        writer.write_all(xml.as_bytes())?;
+        writer.write_all(document.as_bytes())?;
+        if !headers.is_empty() {
+            let header = minimal_docx_xml("hdr", "hdr", headers);
+            writer.start_file("word/header1.xml", options)?;
+            writer.write_all(header.as_bytes())?;
+        }
+        if !footers.is_empty() {
+            let footer = minimal_docx_xml("ftr", "ftr", footers);
+            writer.start_file("word/footer1.xml", options)?;
+            writer.write_all(footer.as_bytes())?;
+        }
         Ok(writer.finish()?.into_inner())
+    }
+
+    fn minimal_docx_xml(root: &str, container: &str, paragraphs: &[&str]) -> String {
+        let mut xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:{root} xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:{container}>
+"#
+        );
+        for paragraph in paragraphs {
+            xml.push_str("    <w:p><w:r><w:t>");
+            xml.push_str(&escape_xml_text(paragraph));
+            xml.push_str("</w:t></w:r></w:p>\n");
+        }
+        xml.push_str(&format!("  </w:{container}>\n</w:{root}>\n"));
+        xml
     }
 
     fn minimal_xlsx_with_rows(rows: &[&[&str]]) -> Result<Vec<u8>> {

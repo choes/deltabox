@@ -171,13 +171,22 @@ impl TextExtractor for DocxTextExtractor {
 
     fn plan_tasks(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
         let text = extract_docx_document_text(bytes)?;
-        Ok(split_text_segments(&text, 100)
+        let mut tasks = split_text_segments(&text, 100)
             .into_iter()
             .enumerate()
             .map(|(segment_index, _)| ExtractionTask {
                 task_key: format!("docx:chunk:{segment_index}"),
             })
-            .collect())
+            .collect::<Vec<_>>();
+        for part in docx_header_footer_parts(bytes)? {
+            let text = extract_docx_part_text(bytes, &part.name)?;
+            if !split_text_segments(&text, 100).is_empty() {
+                tasks.push(ExtractionTask {
+                    task_key: format!("docx:header_footer:{}", part.index),
+                });
+            }
+        }
+        Ok(tasks)
     }
 
     fn extract_task(
@@ -186,22 +195,47 @@ impl TextExtractor for DocxTextExtractor {
         bytes: &[u8],
         task: &ExtractionTask,
     ) -> Result<Vec<ExtractedTextSegment>> {
-        let task_index = task
+        if let Some(task_index) = task.task_key.strip_prefix("docx:chunk:") {
+            let task_index = task_index.parse::<usize>()?;
+            let text = extract_docx_document_text(bytes)?;
+            let segment = split_text_segments(&text, 100)
+                .into_iter()
+                .nth(task_index)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("DOCX chunk task out of range: {}", task.task_key)
+                })?;
+            return Ok(vec![segment_from_text(
+                "docx_text".to_owned(),
+                task.task_key.clone(),
+                task_index,
+                segment,
+            )]);
+        }
+
+        let part_index = task
             .task_key
-            .strip_prefix("docx:chunk:")
+            .strip_prefix("docx:header_footer:")
             .ok_or_else(|| anyhow::anyhow!("unsupported DOCX extraction task: {}", task.task_key))?
-            .parse::<usize>()?;
-        let text = extract_docx_document_text(bytes)?;
-        let segment = split_text_segments(&text, 100)
+            .parse::<u64>()?;
+        let part = docx_header_footer_parts(bytes)?
             .into_iter()
-            .nth(task_index)
-            .ok_or_else(|| anyhow::anyhow!("DOCX chunk task out of range: {}", task.task_key))?;
-        Ok(vec![segment_from_text(
-            "docx_text".to_owned(),
-            task.task_key.clone(),
-            task_index,
-            segment,
-        )])
+            .find(|part| part.index == part_index)
+            .ok_or_else(|| {
+                anyhow::anyhow!("DOCX header/footer task out of range: {}", task.task_key)
+            })?;
+        let text = extract_docx_part_text(bytes, &part.name)?;
+        Ok(split_text_segments(&text, 100)
+            .into_iter()
+            .enumerate()
+            .map(|(segment_index, segment)| {
+                segment_from_text(
+                    "docx_header_footer".to_owned(),
+                    task.task_key.clone(),
+                    segment_index,
+                    segment,
+                )
+            })
+            .collect())
     }
 }
 
@@ -329,11 +363,59 @@ fn segment_from_text(
 }
 
 fn extract_docx_document_text(bytes: &[u8]) -> Result<String> {
+    extract_optional_docx_part_text(bytes, "word/document.xml")
+}
+
+fn extract_optional_docx_part_text(bytes: &[u8], name: &str) -> Result<String> {
     let mut archive = zip_archive(bytes)?;
-    let Some(document) = read_optional_zip_part(&mut archive, "word/document.xml")? else {
+    let Some(document) = read_optional_zip_part(&mut archive, name)? else {
         return Ok(String::new());
     };
     extract_xml_text_nodes(&document, b"t", Some(b"p"))
+}
+
+fn extract_docx_part_text(bytes: &[u8], name: &str) -> Result<String> {
+    let mut archive = zip_archive(bytes)?;
+    let document = read_zip_part(&mut archive, name)?;
+    extract_xml_text_nodes(&document, b"t", Some(b"p"))
+}
+
+#[derive(Debug, Clone)]
+struct DocxPart {
+    index: u64,
+    name: String,
+}
+
+fn docx_header_footer_parts(bytes: &[u8]) -> Result<Vec<DocxPart>> {
+    let mut archive = zip_archive(bytes)?;
+    let mut names = list_zip_parts(&mut archive, "word/header", ".xml")?;
+    names.extend(list_zip_parts(&mut archive, "word/footer", ".xml")?);
+    names.sort_by_key(|name| {
+        (
+            if name.starts_with("word/header") {
+                0
+            } else {
+                1
+            },
+            numbered_docx_part_key(name),
+        )
+    });
+    Ok(names
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| DocxPart {
+            index: index as u64 + 1,
+            name,
+        })
+        .collect())
+}
+
+fn numbered_docx_part_key(name: &str) -> u64 {
+    name.chars()
+        .filter(|value| value.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or(u64::MAX)
 }
 
 fn extract_xlsx_workbook_text(bytes: &[u8]) -> Result<String> {
