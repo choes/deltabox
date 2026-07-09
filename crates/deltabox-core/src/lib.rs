@@ -449,7 +449,7 @@ mod tests {
         let input = input_dir.join("library-plan.pdf");
         fs::write(
             &input,
-            minimal_pdf_with_text("DeltaBox PDF library planning notes"),
+            minimal_pdf_with_pages(&["DeltaBox PDF library planning notes"]),
         )?;
 
         let vault = Vault::init(&root)?;
@@ -492,23 +492,93 @@ mod tests {
         Ok(())
     }
 
-    fn minimal_pdf_with_text(text: &str) -> Vec<u8> {
-        let escaped = text
-            .replace('\\', "\\\\")
-            .replace('(', "\\(")
-            .replace(')', "\\)");
-        let stream = format!("BT\n/F1 18 Tf\n72 720 Td\n({escaped}) Tj\nET\n");
-        let objects = vec![
+    #[test]
+    fn pdf_index_tasks_resume_page_by_page() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("two-pages.pdf");
+        fs::write(
+            &input,
+            minimal_pdf_with_pages(&["first page library planning", "second page roadmap budget"]),
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/two-pages.pdf".to_owned()),
+        })?;
+
+        let job = vault.enqueue_index_file(&manifest.file_id)?;
+        assert_eq!(job.total_tasks, 2);
+        assert_eq!(job.completed_tasks, 0);
+
+        let summary = vault.run_index_worker(1)?;
+        assert_eq!(summary.completed, 1);
+        let jobs = vault.list_index_jobs()?;
+        let job = jobs
+            .iter()
+            .find(|candidate| candidate.job_id == job.job_id)
+            .expect("index job");
+        assert_eq!(job.total_tasks, 2);
+        assert_eq!(job.completed_tasks, 1);
+        assert_eq!(job.status, "pending");
+
+        let conn = vault.open_db()?;
+        let indexed_pages: u64 = conn.query_row(
+            "SELECT COUNT(DISTINCT page) FROM text_segments WHERE file_id = ?1",
+            [&manifest.file_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(indexed_pages, 1);
+
+        let summary = vault.run_index_worker(10)?;
+        assert_eq!(summary.completed, 1);
+        let jobs = vault.list_index_jobs()?;
+        let job = jobs
+            .iter()
+            .find(|candidate| candidate.job_id == job.job_id)
+            .expect("index job");
+        assert_eq!(job.completed_tasks, 2);
+        assert_eq!(job.status, "completed");
+        assert_eq!(vault.search_files("roadmap", false)?.len(), 1);
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    fn minimal_pdf_with_pages(pages: &[&str]) -> Vec<u8> {
+        let page_count = pages.len();
+        let page_object_start = 4_usize;
+        let content_object_start = page_object_start + page_count;
+        let page_refs = (0..page_count)
+            .map(|index| format!("{} 0 R", page_object_start + index))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut objects = vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
-            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_owned(),
+            format!("<< /Type /Pages /Kids [{page_refs}] /Count {page_count} >>"),
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
-            format!(
-                "<< /Length {} >>\nstream\n{}endstream",
-                stream.as_bytes().len(),
-                stream
-            ),
         ];
+        for index in 0..page_count {
+            let content_id = content_object_start + index;
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"
+            ));
+        }
+        for text in pages {
+            let escaped = text
+                .replace('\\', "\\\\")
+                .replace('(', "\\(")
+                .replace(')', "\\)");
+            let stream = format!("BT\n/F1 18 Tf\n72 720 Td\n({escaped}) Tj\nET\n");
+            objects.push(format!(
+                "<< /Length {} >>\nstream\n{}endstream",
+                stream.len(),
+                stream
+            ));
+        }
 
         let mut pdf = b"%PDF-1.4\n".to_vec();
         let mut offsets = Vec::new();

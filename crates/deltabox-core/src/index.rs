@@ -4,7 +4,9 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
-use crate::extractors::{extractor_for_manifest, is_text_extractable, ExtractedTextSegment};
+use crate::extractors::{
+    extractor_for_manifest, is_text_extractable, ExtractedTextSegment, ExtractionTask,
+};
 use crate::manifest::FileManifest;
 use crate::util::now_rfc3339;
 use crate::{IndexJobRecord, Vault};
@@ -38,15 +40,27 @@ impl Vault {
             return self.create_skipped_index_job(&manifest, "unsupported_mime");
         }
 
-        let job = self.create_index_job(&manifest, "document_text", 1, "pending")?;
-        self.upsert_index_task(
-            &job.job_id,
-            &manifest.file_id,
-            "document_text",
-            "text:full",
-            "pending",
-            None,
-        )?;
+        let extractor = extractor_for_manifest(&manifest)
+            .ok_or_else(|| anyhow!("unsupported mime type: {}", manifest.mime))?;
+        let bytes = self.read_file_bytes(&manifest)?;
+        let tasks = extractor.plan_tasks(&manifest, &bytes)?;
+        if tasks.is_empty() {
+            return self.create_skipped_index_job(&manifest, "no_text_tasks");
+        }
+
+        self.delete_text_segments_for_file(&self.open_db()?, &manifest.file_id)?;
+        let job =
+            self.create_index_job(&manifest, "document_text", tasks.len() as u64, "pending")?;
+        for task in tasks {
+            self.upsert_index_task(
+                &job.job_id,
+                &manifest.file_id,
+                "document_text",
+                &task.task_key,
+                "pending",
+                None,
+            )?;
+        }
         Ok(job)
     }
 
@@ -176,8 +190,11 @@ impl Vault {
         let extractor = extractor_for_manifest(&manifest)
             .ok_or_else(|| anyhow!("unsupported mime type: {}", manifest.mime))?;
         let bytes = self.read_file_bytes(&manifest)?;
-        let segments = extractor.extract(&manifest, &bytes)?;
-        self.replace_text_segments(&manifest, segments)?;
+        let extraction_task = ExtractionTask {
+            task_key: task.task_key.clone(),
+        };
+        let segments = extractor.extract_task(&manifest, &bytes, &extraction_task)?;
+        self.replace_text_segments_for_task(&manifest, &task.task_key, segments)?;
         self.record_event(
             "index.updated",
             Some(&manifest.file_id),
@@ -186,13 +203,14 @@ impl Vault {
         Ok(())
     }
 
-    fn replace_text_segments(
+    fn replace_text_segments_for_task(
         &self,
         manifest: &FileManifest,
+        task_key: &str,
         segments: Vec<ExtractedTextSegment>,
     ) -> Result<()> {
         let conn = self.open_db()?;
-        self.delete_text_segments_for_file(&conn, &manifest.file_id)?;
+        self.delete_text_segments_for_task(&conn, &manifest.file_id, task_key)?;
 
         for segment in segments {
             let segment_id = Uuid::new_v4().to_string();
@@ -228,6 +246,30 @@ impl Vault {
                 params![&segment_id, &manifest.file_id, &segment.text],
             )?;
         }
+        Ok(())
+    }
+
+    fn delete_text_segments_for_task(
+        &self,
+        conn: &Connection,
+        file_id: &str,
+        task_key: &str,
+    ) -> Result<()> {
+        let mut stmt = conn
+            .prepare("SELECT segment_id FROM text_segments WHERE file_id = ?1 AND task_key = ?2")?;
+        let segment_ids = stmt
+            .query_map(params![file_id, task_key], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for segment_id in segment_ids {
+            conn.execute(
+                "DELETE FROM text_segments_fts WHERE segment_id = ?1",
+                params![segment_id],
+            )?;
+        }
+        conn.execute(
+            "DELETE FROM text_segments WHERE file_id = ?1 AND task_key = ?2",
+            params![file_id, task_key],
+        )?;
         Ok(())
     }
 

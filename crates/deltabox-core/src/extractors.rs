@@ -4,6 +4,11 @@ use crate::manifest::FileManifest;
 use crate::util::{split_text_segments, TextSegmentDraft};
 
 #[derive(Debug, Clone)]
+pub(crate) struct ExtractionTask {
+    pub(crate) task_key: String,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ExtractedTextSegment {
     pub(crate) source: String,
     pub(crate) task_key: String,
@@ -21,7 +26,13 @@ pub(crate) struct ExtractedTextSegment {
 
 pub(crate) trait TextExtractor {
     fn supports(&self, manifest: &FileManifest) -> bool;
-    fn extract(&self, manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractedTextSegment>>;
+    fn plan_tasks(&self, manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>>;
+    fn extract_task(
+        &self,
+        manifest: &FileManifest,
+        bytes: &[u8],
+        task: &ExtractionTask,
+    ) -> Result<Vec<ExtractedTextSegment>>;
 }
 
 pub(crate) fn extractor_for_manifest(manifest: &FileManifest) -> Option<Box<dyn TextExtractor>> {
@@ -46,7 +57,21 @@ impl TextExtractor for Utf8TextExtractor {
         )
     }
 
-    fn extract(&self, manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractedTextSegment>> {
+    fn plan_tasks(&self, _manifest: &FileManifest, _bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
+        Ok(vec![ExtractionTask {
+            task_key: "text:full".to_owned(),
+        }])
+    }
+
+    fn extract_task(
+        &self,
+        manifest: &FileManifest,
+        bytes: &[u8],
+        task: &ExtractionTask,
+    ) -> Result<Vec<ExtractedTextSegment>> {
+        if task.task_key != "text:full" {
+            anyhow::bail!("unsupported UTF-8 text extraction task: {}", task.task_key);
+        }
         let text = std::str::from_utf8(bytes)?;
         let source = text_source_for_mime(&manifest.mime).to_owned();
         Ok(split_text_segments(text, 100)
@@ -66,29 +91,48 @@ impl TextExtractor for PdfTextExtractor {
         manifest.mime == "application/pdf"
     }
 
-    fn extract(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractedTextSegment>> {
+    fn plan_tasks(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
         let pages = pdf_extract::extract_text_from_mem_by_pages(bytes)?;
+        Ok((1..=pages.len())
+            .map(|page| ExtractionTask {
+                task_key: format!("pdf:page:{page}"),
+            })
+            .collect())
+    }
+
+    fn extract_task(
+        &self,
+        _manifest: &FileManifest,
+        bytes: &[u8],
+        task: &ExtractionTask,
+    ) -> Result<Vec<ExtractedTextSegment>> {
+        let page = task
+            .task_key
+            .strip_prefix("pdf:page:")
+            .ok_or_else(|| anyhow::anyhow!("unsupported PDF extraction task: {}", task.task_key))?
+            .parse::<u64>()?;
+        let pages = pdf_extract::extract_text_from_mem_by_pages(bytes)?;
+        let page_text = pages
+            .get(page.saturating_sub(1) as usize)
+            .ok_or_else(|| anyhow::anyhow!("PDF page task out of range: {}", task.task_key))?;
         let mut segments = Vec::new();
 
-        for (page_index, page_text) in pages.into_iter().enumerate() {
-            let page = page_index as u64 + 1;
-            for segment in split_text_segments(&page_text, 100) {
-                let segment_index = segments.len() as u64;
-                segments.push(ExtractedTextSegment {
-                    source: "pdf_text".to_owned(),
-                    task_key: format!("page:{page}:chunk:{segment_index}"),
-                    segment_index,
-                    text: segment.text,
-                    page: Some(page),
-                    line_start: Some(segment.line_start),
-                    line_end: Some(segment.line_end),
-                    char_start: Some(segment.char_start),
-                    char_end: Some(segment.char_end),
-                    start_ms: None,
-                    end_ms: None,
-                    confidence: 1.0,
-                });
-            }
+        for segment in split_text_segments(page_text, 100) {
+            let segment_index = segments.len() as u64;
+            segments.push(ExtractedTextSegment {
+                source: "pdf_text".to_owned(),
+                task_key: task.task_key.clone(),
+                segment_index,
+                text: segment.text,
+                page: Some(page),
+                line_start: Some(segment.line_start),
+                line_end: Some(segment.line_end),
+                char_start: Some(segment.char_start),
+                char_end: Some(segment.char_end),
+                start_ms: None,
+                end_ms: None,
+                confidence: 1.0,
+            });
         }
 
         Ok(segments)

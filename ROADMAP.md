@@ -15,6 +15,7 @@
 - 通用文本提取器抽象
 - PDF text layer 索引，支持页码定位
 - 搜索结果片段增强
+- PDF 按页索引任务和可恢复进度
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -28,8 +29,8 @@
 1. **索引任务增强**
    - heartbeat / stale timeout
    - pause / resume
-   - 更准确的 job progress
-   - 按页、按片段、按媒体区间的 task 粒度
+   - 文本按 chunk 拆分 task
+   - 视频按媒体区间拆分 task
 
 2. **凭证保护升级**
    - vault password
@@ -81,6 +82,7 @@
 - Generic text extractor abstraction
 - PDF text layer indexing with page locators
 - Detailed search result segments
+- Page-level PDF indexing tasks and resumable progress
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations
@@ -94,8 +96,8 @@
 1. **Index Task Improvements**
    - Heartbeat / stale timeout
    - Pause / resume
-   - More accurate job progress
-   - Task granularity by page, segment, and media time range
+   - Chunk-level tasks for text files
+   - Media-range tasks for video
 
 2. **Credential Protection Upgrade**
    - Vault password
