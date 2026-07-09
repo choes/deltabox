@@ -111,6 +111,7 @@ pub(crate) fn guess_mime(path: &Path) -> String {
         "mov" => "video/quicktime",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         _ => "application/octet-stream",
     }
     .to_owned()

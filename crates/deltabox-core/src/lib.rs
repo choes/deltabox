@@ -749,6 +749,126 @@ mod tests {
     }
 
     #[test]
+    fn pptx_text_is_indexed_by_slide() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("deck.pptx");
+        fs::write(
+            &input,
+            minimal_pptx_with_slides(&[
+                &["DeltaBox PPTX library overview", "first slide"],
+                &["Roadmap budget planning", "second slide"],
+            ])?,
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/deck.pptx".to_owned()),
+        })?;
+        assert_eq!(
+            manifest.mime,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        );
+        assert_eq!(vault.search_files("library overview", false)?.len(), 1);
+        assert_eq!(vault.search_files("budget planning", false)?.len(), 1);
+
+        let segments = vault.text_segments_for_file(&manifest.file_id)?;
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].source, "pptx_text");
+        assert_eq!(segments[0].task_key, "pptx:slide:1");
+        assert_eq!(segments[0].page, Some(1));
+        assert!(segments[0].text.contains("PPTX library overview"));
+        assert_eq!(segments[1].task_key, "pptx:slide:2");
+        assert_eq!(segments[1].page, Some(2));
+        assert!(segments[1].text.contains("Roadmap budget planning"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn pptx_index_tasks_resume_slide_by_slide() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("deck-two-slides.pptx");
+        fs::write(
+            &input,
+            minimal_pptx_with_slides(&[&["first slide archive"], &["second slide roadmap"]])?,
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/deck-two-slides.pptx".to_owned()),
+        })?;
+
+        let job = vault.enqueue_index_file(&manifest.file_id)?;
+        assert_eq!(job.total_tasks, 2);
+        assert_eq!(job.completed_tasks, 0);
+
+        let summary = vault.run_index_worker(1)?;
+        assert_eq!(summary.completed, 1);
+        let jobs = vault.list_index_jobs()?;
+        let job = jobs
+            .iter()
+            .find(|candidate| candidate.job_id == job.job_id)
+            .expect("index job");
+        assert_eq!(job.completed_tasks, 1);
+        assert_eq!(job.status, "pending");
+        assert!(vault.search_files("roadmap", false)?.is_empty());
+
+        let summary = vault.run_index_worker(10)?;
+        assert_eq!(summary.completed, 1);
+        let jobs = vault.list_index_jobs()?;
+        let job = jobs
+            .iter()
+            .find(|candidate| candidate.job_id == job.job_id)
+            .expect("index job");
+        assert_eq!(job.completed_tasks, 2);
+        assert_eq!(job.status, "completed");
+        assert_eq!(vault.search_files("roadmap", false)?.len(), 1);
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_pptx_import_succeeds_and_records_index_error() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("broken.pptx");
+        fs::write(&input, b"not a zip archive")?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/broken.pptx".to_owned()),
+        })?;
+        assert_eq!(vault.list_files(false)?.len(), 1);
+        assert_eq!(vault.text_segments_for_file(&manifest.file_id)?.len(), 0);
+
+        let jobs = vault.list_index_jobs()?;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].file_id, manifest.file_id);
+        assert_eq!(jobs[0].status, "failed_permanent");
+        assert!(jobs[0]
+            .last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("planning_failed"));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn pdf_text_layer_is_indexed_with_page_locator() -> Result<()> {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let input_dir = root.join("input");
@@ -988,6 +1108,33 @@ mod tests {
         writer.write_all(shared.as_bytes())?;
         writer.start_file("xl/worksheets/sheet1.xml", options)?;
         writer.write_all(sheet.as_bytes())?;
+        Ok(writer.finish()?.into_inner())
+    }
+
+    fn minimal_pptx_with_slides(slides: &[&[&str]]) -> Result<Vec<u8>> {
+        let cursor = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+
+        for (index, slide_texts) in slides.iter().enumerate() {
+            let mut slide = String::from(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree>
+"#,
+            );
+            for text in *slide_texts {
+                slide.push_str("    <p:sp><p:txBody><a:p><a:r><a:t>");
+                slide.push_str(&escape_xml_text(text));
+                slide.push_str("</a:t></a:r></a:p></p:txBody></p:sp>\n");
+            }
+            slide.push_str("  </p:spTree></p:cSld>\n</p:sld>\n");
+            writer.start_file(format!("ppt/slides/slide{}.xml", index + 1), options)?;
+            writer.write_all(slide.as_bytes())?;
+        }
+
         Ok(writer.finish()?.into_inner())
     }
 

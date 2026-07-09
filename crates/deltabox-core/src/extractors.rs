@@ -47,6 +47,7 @@ pub(crate) fn extractor_for_manifest(manifest: &FileManifest) -> Option<Box<dyn 
         Box::new(PdfTextExtractor),
         Box::new(DocxTextExtractor),
         Box::new(XlsxTextExtractor),
+        Box::new(PptxTextExtractor),
     ];
     extractors
         .into_iter()
@@ -244,6 +245,64 @@ impl TextExtractor for XlsxTextExtractor {
             task_index,
             segment,
         )])
+    }
+}
+
+struct PptxTextExtractor;
+
+impl TextExtractor for PptxTextExtractor {
+    fn supports(&self, manifest: &FileManifest) -> bool {
+        manifest.mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    }
+
+    fn plan_tasks(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractionTask>> {
+        let slides = pptx_slide_names(bytes)?;
+        Ok(slides
+            .into_iter()
+            .enumerate()
+            .map(|(index, _)| ExtractionTask {
+                task_key: format!("pptx:slide:{}", index + 1),
+            })
+            .collect())
+    }
+
+    fn extract_task(
+        &self,
+        _manifest: &FileManifest,
+        bytes: &[u8],
+        task: &ExtractionTask,
+    ) -> Result<Vec<ExtractedTextSegment>> {
+        let slide = task
+            .task_key
+            .strip_prefix("pptx:slide:")
+            .ok_or_else(|| anyhow::anyhow!("unsupported PPTX extraction task: {}", task.task_key))?
+            .parse::<u64>()?;
+        let slide_name = pptx_slide_names(bytes)?
+            .get(slide.saturating_sub(1) as usize)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("PPTX slide task out of range: {}", task.task_key))?;
+        let text = extract_pptx_slide_text(bytes, &slide_name)?;
+        let mut segments = Vec::new();
+
+        for segment in split_text_segments(&text, 100) {
+            let segment_index = segments.len() as u64;
+            segments.push(ExtractedTextSegment {
+                source: "pptx_text".to_owned(),
+                task_key: task.task_key.clone(),
+                segment_index,
+                text: segment.text,
+                page: Some(slide),
+                line_start: Some(segment.line_start),
+                line_end: Some(segment.line_end),
+                char_start: Some(segment.char_start),
+                char_end: Some(segment.char_end),
+                start_ms: None,
+                end_ms: None,
+                confidence: 1.0,
+            });
+        }
+
+        Ok(segments)
     }
 }
 
@@ -468,6 +527,79 @@ fn parse_xlsx_worksheet_text(xml: &str, shared_strings: &[String]) -> Result<Str
             }
             Event::Text(event) if in_value || in_inline_text => {
                 cell_value.push_str(&event.unescape()?);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+
+    Ok(text)
+}
+
+fn pptx_slide_names(bytes: &[u8]) -> Result<Vec<String>> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor)?;
+    let mut slide_names = (0..archive.len())
+        .filter_map(|index| {
+            archive
+                .by_index(index)
+                .ok()
+                .map(|file| file.name().to_owned())
+        })
+        .filter(|name| {
+            name.starts_with("ppt/slides/slide")
+                && name.ends_with(".xml")
+                && slide_number_from_name(name).is_some()
+        })
+        .collect::<Vec<_>>();
+    slide_names.sort_by_key(|name| slide_number_from_name(name).unwrap_or(u64::MAX));
+    Ok(slide_names)
+}
+
+fn slide_number_from_name(name: &str) -> Option<u64> {
+    name.strip_prefix("ppt/slides/slide")?
+        .strip_suffix(".xml")?
+        .parse()
+        .ok()
+}
+
+fn extract_pptx_slide_text(bytes: &[u8], slide_name: &str) -> Result<String> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor)?;
+    let mut slide = String::new();
+    archive.by_name(slide_name)?.read_to_string(&mut slide)?;
+    parse_pptx_slide_text(&slide)
+}
+
+fn parse_pptx_slide_text(xml: &str) -> Result<String> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut text = String::new();
+    let mut in_text = false;
+
+    loop {
+        match reader.read_event_into(&mut buffer)? {
+            Event::Start(event) => {
+                let name = event.name();
+                let local = local_xml_name(name.as_ref());
+                if local == b"t" {
+                    in_text = true;
+                }
+            }
+            Event::End(event) => {
+                let name = event.name();
+                let local = local_xml_name(name.as_ref());
+                if local == b"t" {
+                    in_text = false;
+                    if !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                }
+            }
+            Event::Text(event) if in_text => {
+                text.push_str(&event.unescape()?);
             }
             Event::Eof => break,
             _ => {}
