@@ -13,6 +13,7 @@
 - 用户标签系统和标签搜索
 - UTF-8 文本文档全文索引
 - 通用文本提取器抽象
+- PDF text layer 索引，支持页码定位
 - `index_jobs` / `index_tasks` 可恢复索引任务模型
 - 多 local backend
 - storage copy / move / verify / locations
@@ -23,11 +24,10 @@
 
 ### 近期计划
 
-1. **PDF 文本索引**
-   - 解析 PDF text layer
-   - 按页生成 `text_segments`
+1. **搜索结果片段增强**
    - 搜索结果返回页码和片段
-   - 大 PDF 支持分页任务和断点续跑
+   - 返回命中的 `text_segments`
+   - 为自然语言搜索和 MCP 工具提供可解释结果
 
 2. **索引任务增强**
    - heartbeat / stale timeout
@@ -83,6 +83,7 @@
 - User tag system and tag search
 - Full-text indexing for UTF-8 text documents
 - Generic text extractor abstraction
+- PDF text layer indexing with page locators
 - Recoverable indexing model with `index_jobs` / `index_tasks`
 - Multiple local backends
 - Storage copy / move / verify / locations
@@ -93,11 +94,10 @@
 
 ### Near-Term Plan
 
-1. **PDF Text Indexing**
-   - Extract PDF text layers
-   - Generate page-level `text_segments`
+1. **Search Result Segment Improvements**
    - Return page and segment information in search results
-   - Support page-level tasks and resumable indexing for large PDFs
+   - Return matched `text_segments`
+   - Provide explainable results for natural language search and MCP tools
 
 2. **Index Task Improvements**
    - Heartbeat / stale timeout

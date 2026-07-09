@@ -25,7 +25,8 @@ pub(crate) trait TextExtractor {
 }
 
 pub(crate) fn extractor_for_manifest(manifest: &FileManifest) -> Option<Box<dyn TextExtractor>> {
-    let extractors: Vec<Box<dyn TextExtractor>> = vec![Box::new(Utf8TextExtractor)];
+    let extractors: Vec<Box<dyn TextExtractor>> =
+        vec![Box::new(Utf8TextExtractor), Box::new(PdfTextExtractor)];
     extractors
         .into_iter()
         .find(|extractor| extractor.supports(manifest))
@@ -55,6 +56,42 @@ impl TextExtractor for Utf8TextExtractor {
                 segment_from_text(source.clone(), segment_index, segment)
             })
             .collect())
+    }
+}
+
+struct PdfTextExtractor;
+
+impl TextExtractor for PdfTextExtractor {
+    fn supports(&self, manifest: &FileManifest) -> bool {
+        manifest.mime == "application/pdf"
+    }
+
+    fn extract(&self, _manifest: &FileManifest, bytes: &[u8]) -> Result<Vec<ExtractedTextSegment>> {
+        let pages = pdf_extract::extract_text_from_mem_by_pages(bytes)?;
+        let mut segments = Vec::new();
+
+        for (page_index, page_text) in pages.into_iter().enumerate() {
+            let page = page_index as u64 + 1;
+            for segment in split_text_segments(&page_text, 100) {
+                let segment_index = segments.len() as u64;
+                segments.push(ExtractedTextSegment {
+                    source: "pdf_text".to_owned(),
+                    task_key: format!("page:{page}:chunk:{segment_index}"),
+                    segment_index,
+                    text: segment.text,
+                    page: Some(page),
+                    line_start: Some(segment.line_start),
+                    line_end: Some(segment.line_end),
+                    char_start: Some(segment.char_start),
+                    char_end: Some(segment.char_end),
+                    start_ms: None,
+                    end_ms: None,
+                    confidence: 1.0,
+                });
+            }
+        }
+
+        Ok(segments)
     }
 }
 

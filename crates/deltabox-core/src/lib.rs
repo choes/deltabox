@@ -422,4 +422,82 @@ mod tests {
         fs::remove_dir_all(root)?;
         Ok(())
     }
+
+    #[test]
+    fn pdf_text_layer_is_indexed_with_page_locator() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
+        let input_dir = root.join("input");
+        fs::create_dir_all(&input_dir)?;
+
+        let input = input_dir.join("library-plan.pdf");
+        fs::write(
+            &input,
+            minimal_pdf_with_text("DeltaBox PDF library planning notes"),
+        )?;
+
+        let vault = Vault::init(&root)?;
+        let manifest = vault.add_file(AddOptions {
+            source: input,
+            logical_path: Some("/docs/library-plan.pdf".to_owned()),
+        })?;
+        assert_eq!(manifest.mime, "application/pdf");
+
+        let search = vault.search_files("library", false)?;
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].file_id, manifest.file_id);
+
+        let conn = vault.open_db()?;
+        let (source, page): (String, Option<u64>) = conn.query_row(
+            "SELECT source, page FROM text_segments WHERE file_id = ?1",
+            [&manifest.file_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(source, "pdf_text");
+        assert_eq!(page, Some(1));
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    fn minimal_pdf_with_text(text: &str) -> Vec<u8> {
+        let escaped = text
+            .replace('\\', "\\\\")
+            .replace('(', "\\(")
+            .replace(')', "\\)");
+        let stream = format!("BT\n/F1 18 Tf\n72 720 Td\n({escaped}) Tj\nET\n");
+        let objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_owned(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
+            format!(
+                "<< /Length {} >>\nstream\n{}endstream",
+                stream.as_bytes().len(),
+                stream
+            ),
+        ];
+
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", index + 1, object).as_bytes());
+        }
+
+        let xref_offset = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                objects.len() + 1,
+                xref_offset
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
 }
