@@ -45,42 +45,42 @@ deltabox 是一个 AI 增强型、去中心化优先的个人文件系统原型�
 ### 快速开始
 
 ```bash
-cargo build
-cargo test
+cargo build --release
+cargo test --release
 ```
 
 初始化 vault：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo init
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo init
 ```
 
 添加文件：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo add ./notes.txt --path /docs/notes.txt
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo add ./notes.txt --path /docs/notes.txt
 ```
 
 搜索文件名、路径、标签和全文内容：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo search planning
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo search planning
 ```
 
 查看搜索命中的片段、页码和来源：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details
 ```
 
 输出 JSON 供 Agent / Skill 使用：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo info <file_id> --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index segments <file_id> --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag file <file_id> --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo info <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index segments <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo tag file <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id> --json
 ```
 
 安装本地 Codex Skill：
@@ -93,30 +93,30 @@ cp .codex/skills/deltabox/SKILL.md ~/.codex/skills/deltabox/SKILL.md
 控制后台索引任务：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index pause <job_id>
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index resume <job_id>
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index run --limit 10 --stale-timeout-seconds 600
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index pause <job_id>
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index resume <job_id>
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index run --limit 10 --stale-timeout-seconds 600
 ```
 
 添加标签：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag create 工作规划 --tag-type project
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag attach <file_id> 工作规划
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo tag create 工作规划 --tag-type project
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo tag attach <file_id> 工作规划
 ```
 
 添加本地备份 backend 并复制文件：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-local backup /tmp/deltabox-backup
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage copy <file_id> backup
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id>
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-local backup /tmp/deltabox-backup
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage copy <file_id> backup
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id>
 ```
 
 添加 S3-compatible backend：
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 minio \
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 minio \
   --endpoint http://localhost:9000 \
   --bucket deltabox \
   --region us-east-1 \
@@ -184,42 +184,42 @@ This repository contains:
 ### Quick Start
 
 ```bash
-cargo build
-cargo test
+cargo build --release
+cargo test --release
 ```
 
 Initialize a vault:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo init
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo init
 ```
 
 Add a file:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo add ./notes.txt --path /docs/notes.txt
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo add ./notes.txt --path /docs/notes.txt
 ```
 
 Search by filename, path, tags, and indexed text:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo search planning
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo search planning
 ```
 
 Show matched segments, pages, and sources:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details
 ```
 
 Output JSON for Agents / Skills:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo info <file_id> --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index segments <file_id> --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag file <file_id> --json
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo search planning --details --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo info <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index segments <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo tag file <file_id> --json
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id> --json
 ```
 
 Install the local Codex Skill:
@@ -232,30 +232,30 @@ cp .codex/skills/deltabox/SKILL.md ~/.codex/skills/deltabox/SKILL.md
 Control background indexing jobs:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index pause <job_id>
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index resume <job_id>
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo index run --limit 10 --stale-timeout-seconds 600
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index pause <job_id>
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index resume <job_id>
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo index run --limit 10 --stale-timeout-seconds 600
 ```
 
 Add tags:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag create work-plan --tag-type project
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo tag attach <file_id> work-plan
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo tag create work-plan --tag-type project
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo tag attach <file_id> work-plan
 ```
 
 Add a local backup backend and copy a file:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-local backup /tmp/deltabox-backup
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage copy <file_id> backup
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id>
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-local backup /tmp/deltabox-backup
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage copy <file_id> backup
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage locations <file_id>
 ```
 
 Add an S3-compatible backend:
 
 ```bash
-cargo run -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 minio \
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 minio \
   --endpoint http://localhost:9000 \
   --bucket deltabox \
   --region us-east-1 \

@@ -41,4 +41,4 @@ DELTABOX_S3_ENDPOINT="${ENDPOINT}" \
 DELTABOX_S3_BUCKET="${BUCKET}" \
 DELTABOX_S3_ACCESS_KEY="${ACCESS_KEY}" \
 DELTABOX_S3_SECRET_KEY="${SECRET_KEY}" \
-cargo test -p deltabox-core --test minio_integration -- --ignored --nocapture
+cargo test --release -p deltabox-core --test minio_integration -- --ignored --nocapture
