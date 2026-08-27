@@ -72,6 +72,9 @@ impl Vault {
 
     pub fn get_manifest(&self, file_id: &str) -> Result<FileManifest> {
         let path = self.manifest_path(file_id);
+        if !path.exists() {
+            anyhow::bail!("file not found: {file_id}");
+        }
         let data = fs::read_to_string(&path)
             .with_context(|| format!("failed to read manifest: {}", path.display()))?;
         serde_json::from_str(&data).context("failed to parse manifest")

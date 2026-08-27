@@ -10,6 +10,8 @@ deltabox 是一个 AI 增强型、去中心化优先的个人文件系统原型�
 
 - `deltabox-core`：Rust 核心库，负责 manifest、chunk、storage backend、索引、标签、回收站和凭证保护。
 - `deltabox-cli`：命令行原型，用于验证 core 的文件生命周期和存储迁移能力。
+- `deltabox-server`：REST API 服务（axum），包装 core 并托管 H5 前端。
+- `apps/web`：Vue 3 + Vant 移动端 H5 应用，覆盖文件浏览、搜索、上传下载、标签和索引任务。
 
 ### 当前能力
 
@@ -41,6 +43,7 @@ deltabox 是一个 AI 增强型、去中心化优先的个人文件系统原型�
 - `index segments <file_id> --json`，支持按文件读取已索引文本片段
 - 可恢复索引任务模型：`index_jobs` / `index_tasks`
 - S3 access key / secret key 本地加密保存
+- H5 Web 应用：axum REST API + Vue 3 移动端界面，支持文件浏览、全文搜索、上传下载、标签管理和索引任务控制
 
 ### 快速开始
 
@@ -133,6 +136,17 @@ cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3
 scripts/minio-integration-test.sh
 ```
 
+### H5 Web 应用
+
+构建前端并启动 REST API 服务：
+
+```bash
+cd apps/web && pnpm install && pnpm build && cd ../..
+cargo run --release -p deltabox-server -- --vault /tmp/deltabox-demo --port 8080
+```
+
+浏览器访问 `http://localhost:8080`（局域网内手机可访问 `http://<本机IP>:8080`）。开发前端时可另跑 `cd apps/web && pnpm dev`，`/api` 请求会自动代理到 8080 端口。
+
 ### 安全说明
 
 当前版本会生成 `.deltabox/vault.key`，并用它加密保存 S3 backend 的 `access_key` 和 `secret_key`。这比明文存储更安全，但还不是最终的安全模型。后续计划接入用户密码、系统钥匙串、恢复密钥和密钥轮换。
@@ -149,6 +163,8 @@ This repository contains:
 
 - `deltabox-core`: the Rust core library for manifests, chunks, storage backends, indexes, tags, trash, and credential protection.
 - `deltabox-cli`: a command-line prototype used to validate file lifecycle and storage migration behavior.
+- `deltabox-server`: a REST API server (axum) that wraps the core and hosts the H5 frontend.
+- `apps/web`: a Vue 3 + Vant mobile H5 app covering file browsing, search, upload/download, tags, and index jobs.
 
 ### Current Capabilities
 
@@ -180,6 +196,7 @@ This repository contains:
 - `index segments <file_id> --json` for reading indexed text segments by file
 - Recoverable indexing task model with `index_jobs` / `index_tasks`
 - Local encryption for S3 access key / secret key
+- H5 web app: axum REST API + Vue 3 mobile UI with file browsing, full-text search, upload/download, tag management, and index job control
 
 ### Quick Start
 
@@ -271,6 +288,17 @@ Run the local MinIO integration test:
 ```bash
 scripts/minio-integration-test.sh
 ```
+
+### H5 Web App
+
+Build the frontend and start the REST API server:
+
+```bash
+cd apps/web && pnpm install && pnpm build && cd ../..
+cargo run --release -p deltabox-server -- --vault /tmp/deltabox-demo --port 8080
+```
+
+Open `http://localhost:8080` in a browser (phones on the same LAN can use `http://<host-ip>:8080`). For frontend development, run `cd apps/web && pnpm dev` — `/api` requests are proxied to port 8080 automatically.
 
 ### Security Note
 

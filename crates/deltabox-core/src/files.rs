@@ -249,7 +249,7 @@ impl Vault {
         Ok(())
     }
 
-    pub(crate) fn read_file_bytes(&self, manifest: &FileManifest) -> Result<Vec<u8>> {
+    pub fn read_file_bytes(&self, manifest: &FileManifest) -> Result<Vec<u8>> {
         let mut bytes = Vec::with_capacity(manifest.size as usize);
         for chunk in self.read_file_chunks(manifest)? {
             bytes.extend(chunk);

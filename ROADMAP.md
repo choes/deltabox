@@ -36,6 +36,7 @@
 - S3-compatible backend
 - 真实 MinIO / S3 集成测试
 - S3 backend 凭证本地加密保存
+- H5 Web 应用：deltabox-server REST API + Vue 3 移动端界面（文件浏览、搜索、上传下载、标签、索引任务）
 
 ### 近期计划
 
@@ -115,6 +116,7 @@
 - S3-compatible backend
 - Real MinIO / S3 integration test
 - Local encryption for S3 backend credentials
+- H5 web app: deltabox-server REST API + Vue 3 mobile UI (file browsing, search, upload/download, tags, index jobs)
 
 ### Near-Term Plan
 

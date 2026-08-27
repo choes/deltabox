@@ -14,7 +14,7 @@ use crate::{IndexJobRecord, TextSegmentRecord, Vault};
 
 const DEFAULT_STALE_TIMEOUT_SECONDS: i64 = 600;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct IndexRunSummary {
     pub completed: u64,
     pub failed: u64,
