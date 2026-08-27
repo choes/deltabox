@@ -147,6 +147,8 @@ cargo run --release -p deltabox-server -- --vault /tmp/deltabox-demo --port 8080
 
 浏览器访问 `http://localhost:8080`（局域网内手机可访问 `http://<本机IP>:8080`）。开发前端时可另跑 `cd apps/web && pnpm dev`，`/api` 请求会自动代理到 8080 端口。
 
+注意：H5 是运行 deltabox-server 的那台设备的远程 UI——手机浏览器访问时管理的是那台设备上的 vault，不是手机自己的存储。多设备共同管理同一个 vault 的规划见 `docs/design.md`（共享后端 + 事件日志同步）。
+
 ### 安全说明
 
 当前版本会生成 `.deltabox/vault.key`，并用它加密保存 S3 backend 的 `access_key` 和 `secret_key`。这比明文存储更安全，但还不是最终的安全模型。后续计划接入用户密码、系统钥匙串、恢复密钥和密钥轮换。
@@ -299,6 +301,8 @@ cargo run --release -p deltabox-server -- --vault /tmp/deltabox-demo --port 8080
 ```
 
 Open `http://localhost:8080` in a browser (phones on the same LAN can use `http://<host-ip>:8080`). For frontend development, run `cd apps/web && pnpm dev` — `/api` requests are proxied to port 8080 automatically.
+
+Note: the H5 app is a remote UI for the device running deltabox-server — a phone browser manages that device's vault, not the phone's own storage. See `docs/design.md` for the multi-device plan (shared backend + event log sync).
 
 ### Security Note
 

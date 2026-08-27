@@ -51,6 +51,18 @@
    - key rotation
    - backend credential migration
 
+3. **远端入库与本地空间释放**
+   - 添加文件时选择目标后端（S3 / 邮箱 / WebDAV）
+   - 上传并逐 chunk 校验后可删除本地副本（offload），本地保留元数据和索引
+   - 打开文件时按需从远端取回
+   - 文件状态区分 local / remote_only / cached
+
+4. **用量统计**
+   - `usage_stats` 计数器表，数据变更时同事务增量维护
+   - 逻辑量走计数器，物理量（SQLite 体积、目录占用）读取时实测
+   - `stats` 命令和 `/api/stats`，含 `--reconcile` 对账校正
+   - 区分 vault 总量与本机占用
+
 ### 中期计划
 
 - 图片和扫描版 PDF 的 OCR
@@ -66,7 +78,13 @@
 - 存储策略再平衡器
 - S3-compatible backend 稳定性增强
 - WebDAV backend
-- 邮箱 backend 原型
+- 基于共享后端的 vault 事件同步（event log over S3 / Email，无中心服务器）
+  - vault_id、设备身份、事件签名
+  - 共享后端上的事件日志为同步真相，本地 SQLite 为物化视图
+  - 事件日志 compaction 与状态快照
+  - 跨设备 GC 宽限期与冲突保留多版本
+- 邮箱 backend 原型：chunk 存储 + `DeltaBox/Events` 事件同步通道
+- 移动端 App 原型（一等设备，持有自己的 vault 副本）
 - MCP server 原型
   - 在 Skill 工作流和 CLI JSON 输出稳定后开始
   - 当需要多个智能体或应用共享结构化工具时开始
@@ -75,11 +93,11 @@
 
 ### 长期计划
 
-- 端到端加密的多设备同步
-- 设备身份和设备撤销
+- 端到端加密的多设备同步完善（完整冲突解决、局域网发现、推送通知）
+- 设备撤销与密钥轮换
 - 分享与协作
 - Local-first AI 助手集成
-- 支持可恢复后台索引的移动端应用
+- 移动端 App 完整功能（后台索引、照片自动入库）
 - 本地向量索引和语义搜索
 
 ## English
@@ -131,6 +149,18 @@
    - Key rotation
    - Backend credential migration
 
+3. **Remote Ingest and Local Space Reclaim**
+   - Choose a target backend (S3 / email / WebDAV) when adding files
+   - Optionally delete local chunks after per-chunk remote verification (offload), keeping metadata and indexes locally
+   - Fetch files back from the remote on demand
+   - Distinguish file states: local / remote_only / cached
+
+4. **Usage Statistics**
+   - `usage_stats` counter table updated in the same transaction as each mutation
+   - Logical sizes via counters; physical sizes (SQLite file, directories) measured on read
+   - `stats` command and `/api/stats`, with `--reconcile` for drift correction
+   - Distinguish vault-wide totals from this-device usage
+
 ### Mid-Term Plan
 
 - OCR for images and scanned PDFs
@@ -146,7 +176,13 @@
 - Storage policy rebalancer
 - S3-compatible backend hardening
 - WebDAV backend
-- Email backend prototype
+- Vault event sync over shared backends (event log over S3 / email, no central server)
+  - vault_id, device identity, signed events
+  - Event log on the shared backend is the sync truth; local SQLite is a materialized view
+  - Event log compaction and state snapshots
+  - Cross-device GC grace period and conflict-preserving versions
+- Email backend prototype: chunk storage + `DeltaBox/Events` sync channel
+- Mobile app prototype (first-class device holding its own vault replica)
 - MCP server prototype
   - Start after Skill workflows and CLI JSON output are stable
   - Start when multiple agents or apps need shared structured tools
@@ -155,9 +191,9 @@
 
 ### Long-Term Plan
 
-- End-to-end encrypted multi-device sync
-- Device identity and revocation
+- End-to-end encrypted multi-device sync hardening (full conflict resolution, LAN discovery, push notifications)
+- Device revocation and key rotation
 - Sharing and collaboration
 - Local-first AI assistant integration
-- Mobile app with resumable background indexing
+- Full mobile app features (background indexing, automatic photo ingest)
 - Local vector index and semantic search
