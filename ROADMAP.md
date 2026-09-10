@@ -83,7 +83,8 @@
   - 共享后端上的事件日志为同步真相，本地 SQLite 为物化视图
   - 事件日志 compaction 与状态快照
   - 跨设备 GC 宽限期与冲突保留多版本
-- 邮箱 backend 原型：chunk 存储 + `DeltaBox/Events` 事件同步通道
+- 邮箱 backend 原型：IMAP APPEND 写入的 chunk 存储（按服务商 profile 配置 chunk 大小）+ `DeltaBox/Events` 事件同步通道（APPEND 优先、SMTP 兜底，可镜像到第二邮箱）
+- 邮箱池（Email Pool）：多邮箱统一管理、健康状态机（healthy / degraded / unreachable）、degraded 时 rebalance、email → S3 迁移
 - 移动端 App 原型（一等设备，持有自己的 vault 副本）
 - MCP server 原型
   - 在 Skill 工作流和 CLI JSON 输出稳定后开始
@@ -181,7 +182,8 @@
   - Event log on the shared backend is the sync truth; local SQLite is a materialized view
   - Event log compaction and state snapshots
   - Cross-device GC grace period and conflict-preserving versions
-- Email backend prototype: chunk storage + `DeltaBox/Events` sync channel
+- Email backend prototype: IMAP APPEND-based chunk storage (per-provider chunk size profiles) + `DeltaBox/Events` sync channel (APPEND-first with SMTP fallback, optionally mirrored to a second mailbox)
+- Email pool: unified management of multiple mailboxes, health states (healthy / degraded / unreachable), rebalance on degradation, and email → S3 migration
 - Mobile app prototype (first-class device holding its own vault replica)
 - MCP server prototype
   - Start after Skill workflows and CLI JSON output are stable
