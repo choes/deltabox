@@ -1,5 +1,9 @@
 # deltabox
 
+<p align="center">
+  <img src="logo/deltabox-logo.png" alt="deltabox logo" width="360">
+</p>
+
 [中文](#中文) | [English](#english)
 
 ## 中文
