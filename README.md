@@ -21,7 +21,7 @@ deltabox 是一个 AI 增强型、去中心化优先的个人文件系统原型�
 - 多 local backend 配置
 - S3-compatible backend 配置与读写实现
 - storage copy / move / verify / locations
-- 真实 MinIO 集成测试，覆盖 S3 copy / verify / restore / move
+- 真实 RustFS 集成测试，覆盖 S3 copy / verify / restore / move
 - 回收站、恢复、永久删除和 chunk GC
 - 用户标签创建、绑定、重命名、删除和标签搜索
 - UTF-8 文本全文索引，基于 `text_segments` + SQLite FTS5
@@ -119,7 +119,7 @@ cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage locati
 添加 S3-compatible backend：
 
 ```bash
-cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 minio \
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 rustfs \
   --endpoint http://localhost:9000 \
   --bucket deltabox \
   --region us-east-1 \
@@ -130,10 +130,10 @@ cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3
   --path-style true
 ```
 
-运行本地 MinIO 集成测试：
+运行本地 RustFS 集成测试：
 
 ```bash
-scripts/minio-integration-test.sh
+scripts/rustfs-integration-test.sh
 ```
 
 ### H5 Web 应用
@@ -176,7 +176,7 @@ This repository contains:
 - Multiple local backend configuration
 - S3-compatible backend configuration and implementation
 - Storage copy / move / verify / locations
-- Real MinIO integration test covering S3 copy / verify / restore / move
+- Real RustFS integration test covering S3 copy / verify / restore / move
 - Trash, restore, purge, and chunk GC
 - User tag creation, attach, rename, delete, and tag search
 - UTF-8 text full-text indexing with `text_segments` + SQLite FTS5
@@ -274,7 +274,7 @@ cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo storage locati
 Add an S3-compatible backend:
 
 ```bash
-cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 minio \
+cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3 rustfs \
   --endpoint http://localhost:9000 \
   --bucket deltabox \
   --region us-east-1 \
@@ -285,10 +285,10 @@ cargo run --release -p deltabox-cli -- --vault /tmp/deltabox-demo backend add-s3
   --path-style true
 ```
 
-Run the local MinIO integration test:
+Run the local RustFS integration test:
 
 ```bash
-scripts/minio-integration-test.sh
+scripts/rustfs-integration-test.sh
 ```
 
 ### H5 Web App

@@ -554,7 +554,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("deltabox-core-test-{}", Uuid::new_v4()));
         let vault = Vault::init(&root)?;
         vault.add_s3_backend(
-            "minio",
+            "rustfs",
             "http://localhost:9000".to_owned(),
             "deltabox".to_owned(),
             "us-east-1".to_owned(),
@@ -568,18 +568,18 @@ mod tests {
         let backends = vault.list_backends()?;
         assert!(backends
             .iter()
-            .any(|backend| backend.backend_id == "minio" && backend.backend_type == "s3"));
+            .any(|backend| backend.backend_id == "rustfs" && backend.backend_type == "s3"));
 
-        let object_key = vault.object_key_for_backend_chunk("minio", "sha256:abcdef1234567890")?;
+        let object_key = vault.object_key_for_backend_chunk("rustfs", "sha256:abcdef1234567890")?;
         assert_eq!(object_key, "chunks/ab/cdef1234567890");
 
-        let minio = backends
+        let rustfs = backends
             .iter()
-            .find(|backend| backend.backend_id == "minio")
-            .expect("minio backend");
-        assert!(!minio.config_json.contains("access"));
-        assert!(!minio.config_json.contains("secret"));
-        assert!(vault.storage_backend_by_id("minio").is_ok());
+            .find(|backend| backend.backend_id == "rustfs")
+            .expect("rustfs backend");
+        assert!(!rustfs.config_json.contains("access"));
+        assert!(!rustfs.config_json.contains("secret"));
+        assert!(vault.storage_backend_by_id("rustfs").is_ok());
 
         fs::remove_dir_all(root)?;
         Ok(())
