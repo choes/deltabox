@@ -3,3 +3,6 @@
 *.sqlite3
 node_modules/
 /apps/web/dist/
+
+# Full-resolution logo source renders; only the trimmed logo/deltabox-logo.png is tracked
+/logo/deltabox-logo-v*.png
